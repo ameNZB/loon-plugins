@@ -32,19 +32,64 @@ type GroupInfo struct {
 
 // GroupStat is the crawl status of one active group.
 type GroupStat struct {
-	Name          string
-	NZBs          int
-	Staged        int // articles waiting in staging (not yet assembled)
-	LastCrawl     time.Time
-	HighWatermark int64 // highest article number crawled
-	ServerHigh    int64 // server's highest article number
+	Name              string
+	NZBs              int
+	Staged            int // articles waiting in staging (not yet assembled)
+	LastCrawl         time.Time
+	HighWatermark     int64     // highest article number crawled (forward position)
+	HighWatermarkDate time.Time // posting date at the forward position
+	BackWatermark     int64     // backfill position; walks down toward ServerLow
+	BackWatermarkDate time.Time // posting date reached by backfill
+	ServerLow         int64     // server's oldest retained article number
+	ServerHigh        int64     // server's highest article number
+	BackfillDone      bool      // backfill reached ServerLow or the retention horizon
+}
+
+// CoverageBar is the 3-segment coverage of a group over [ServerLow..ServerHigh],
+// as percentages that sum to ~100 when Known. Back = still-to-backfill (below
+// back_watermark), Have = indexed span, New = not-yet-fetched-forward (above
+// high_watermark).
+type CoverageBar struct {
+	BackPct float64
+	HavePct float64
+	NewPct  float64
+	Known   bool // false when the server span is unknown (never crawled)
+}
+
+// Coverage derives the coverage bar from the watermarks. Pure; the host page
+// renders BackPct/HavePct/NewPct as a stacked bar.
+func (g GroupStat) Coverage() CoverageBar {
+	span := float64(g.ServerHigh - g.ServerLow)
+	if span <= 0 {
+		return CoverageBar{Known: false}
+	}
+	back := g.BackWatermark
+	if back < g.ServerLow {
+		back = g.ServerLow
+	}
+	if back > g.HighWatermark {
+		back = g.HighWatermark
+	}
+	pct := func(n int64) float64 {
+		if n < 0 {
+			n = 0
+		}
+		return float64(n) / span * 100
+	}
+	return CoverageBar{
+		BackPct: pct(back - g.ServerLow),
+		HavePct: pct(g.HighWatermark - back),
+		NewPct:  pct(g.ServerHigh - g.HighWatermark),
+		Known:   true,
+	}
 }
 
 // IndexStats summarizes what the indexer has pulled so far.
 type IndexStats struct {
-	TotalNZBs   int
-	TotalStaged int
-	Groups      []GroupStat // active groups
+	TotalNZBs              int
+	TotalStaged            int
+	TotalBackfillRemaining int64       // sum of (back_watermark - server_low) over active groups still backfilling
+	Groups                 []GroupStat // active groups
 }
 
 // Server is the NNTP server configuration the setup wizard edits.
@@ -79,7 +124,10 @@ type UsenetAdmin interface {
 	GroupCount(ctx context.Context) (int, error)   // total groups fetched (for "showing N of M")
 	Stats(ctx context.Context) (IndexStats, error) // crawl progress: totals + per-active-group status
 	SetGroupActive(ctx context.Context, name string, active bool) error
-	TriggerCrawl() // fire the crawler job now
+	TriggerCrawl()    // fire the crawler job now
+	TriggerBackfill() // fire the backfill job now
+	// ResetBackfill re-arms a group's backfill from its high watermark downward.
+	ResetBackfill(ctx context.Context, name string) error
 }
 
 const (

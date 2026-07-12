@@ -3,6 +3,7 @@ package usenet
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -86,11 +87,18 @@ func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {
 			Staged     int          `db:"staged"`
 			LastCrawl  sql.NullTime `db:"last_crawl"`
 			Watermark  int64        `db:"high_watermark"`
+			HWDate     sql.NullTime `db:"high_watermark_date"`
+			Back       int64        `db:"back_watermark"`
+			BackDate   sql.NullTime `db:"back_watermark_date"`
+			ServerLow  int64        `db:"server_low"`
 			ServerHigh int64        `db:"server_high"`
+			Done       bool         `db:"backfill_done"`
 		}
 		var rows []row
 		if err := tx.SelectContext(ctx, &rows,
-			`SELECT g.name, g.high_watermark, g.server_high, g.last_crawl,
+			`SELECT g.name, g.high_watermark, g.high_watermark_date,
+			        COALESCE(g.back_watermark, g.high_watermark) AS back_watermark,
+			        g.back_watermark_date, g.server_low, g.server_high, g.last_crawl, g.backfill_done,
 			        (SELECT COUNT(*) FROM nzbs n WHERE n.group_name = g.name) AS nzbs,
 			        (SELECT COUNT(*) FROM articles a WHERE a.group_name = g.name) AS staged
 			 FROM newsgroups g WHERE g.active = TRUE ORDER BY g.name`); err != nil {
@@ -99,10 +107,20 @@ func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {
 		for _, r := range rows {
 			gs := pluginapi.GroupStat{
 				Name: r.Name, NZBs: r.NZBs, Staged: r.Staged,
-				HighWatermark: r.Watermark, ServerHigh: r.ServerHigh,
+				HighWatermark: r.Watermark, BackWatermark: r.Back,
+				ServerLow: r.ServerLow, ServerHigh: r.ServerHigh, BackfillDone: r.Done,
 			}
 			if r.LastCrawl.Valid {
 				gs.LastCrawl = r.LastCrawl.Time
+			}
+			if r.HWDate.Valid {
+				gs.HighWatermarkDate = r.HWDate.Time
+			}
+			if r.BackDate.Valid {
+				gs.BackWatermarkDate = r.BackDate.Time
+			}
+			if !r.Done && r.Back > r.ServerLow {
+				st.TotalBackfillRemaining += r.Back - r.ServerLow
 			}
 			st.Groups = append(st.Groups, gs)
 		}
@@ -244,6 +262,83 @@ func (s *store) groupCount(ctx context.Context) (int, error) {
 func (s *store) setGroupActive(ctx context.Context, name string, active bool) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE newsgroups SET active = $2 WHERE name = $1`, name, active)
+		return err
+	})
+}
+
+// ── backfill ────────────────────────────────────────────────────────
+
+// backfillRow is one active group that still has history to fetch below its
+// back_watermark.
+type backfillRow struct {
+	Name          string
+	BackWatermark int64
+	ServerLow     int64
+}
+
+// groupsNeedingBackfill lists active groups not yet marked done whose backfill
+// pointer is still above the server's oldest article.
+func (s *store) groupsNeedingBackfill(ctx context.Context, limit int) ([]backfillRow, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	type row struct {
+		Name string `db:"name"`
+		Back int64  `db:"back_watermark"`
+		Low  int64  `db:"server_low"`
+	}
+	var rows []row
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		return tx.SelectContext(ctx, &rows,
+			`SELECT name, COALESCE(back_watermark, high_watermark) AS back_watermark, server_low
+			 FROM newsgroups
+			 WHERE active = TRUE AND NOT backfill_done
+			   AND COALESCE(back_watermark, high_watermark) > server_low
+			 ORDER BY name LIMIT $1`, limit)
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]backfillRow, len(rows))
+	for i, r := range rows {
+		out[i] = backfillRow{Name: r.Name, BackWatermark: r.Back, ServerLow: r.Low}
+	}
+	return out, nil
+}
+
+// updateBackWatermark lowers a group's backfill pointer and records the oldest
+// posting date reached (kept if the batch had no dated articles).
+func (s *store) updateBackWatermark(ctx context.Context, name string, back int64, oldest time.Time) error {
+	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var d sql.NullTime
+		if !oldest.IsZero() {
+			d = sql.NullTime{Time: oldest, Valid: true}
+		}
+		_, err := tx.ExecContext(ctx,
+			`UPDATE newsgroups
+			   SET back_watermark = $2,
+			       back_watermark_date = COALESCE($3, back_watermark_date)
+			 WHERE name = $1`, name, back, d)
+		return err
+	})
+}
+
+func (s *store) markBackfillDone(ctx context.Context, name string) error {
+	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE newsgroups SET backfill_done = TRUE WHERE name = $1`, name)
+		return err
+	})
+}
+
+// resetBackfill re-arms a group: backfill restarts just below the forward
+// watermark and walks down again (dupes are ignored on insert).
+func (s *store) resetBackfill(ctx context.Context, name string) error {
+	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`UPDATE newsgroups
+			   SET back_watermark = GREATEST(high_watermark - 1, server_low),
+			       back_watermark_date = NULL, backfill_done = FALSE
+			 WHERE name = $1`, name)
 		return err
 	})
 }

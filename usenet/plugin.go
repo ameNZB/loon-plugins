@@ -34,10 +34,11 @@ type Plugin struct {
 	st   *store
 	svc  *service
 
-	crawlJob core.Job
-	buildJob core.Job
-	tagJob   core.Job
-	pruneJob core.Job
+	crawlJob    core.Job
+	backfillJob core.Job
+	buildJob    core.Job
+	tagJob      core.Job
+	pruneJob    core.Job
 }
 
 func (p *Plugin) Metadata() core.Metadata {
@@ -74,6 +75,8 @@ func (p *Plugin) Provision(c *core.Core) error {
 	if c.Process == "worker" || c.Process == "all" {
 		p.crawlJob = c.Scheduler.RegisterJob("Usenet Crawler",
 			"Fetches recent article overviews from active newsgroups").MarkOffPeak()
+		p.backfillJob = c.Scheduler.RegisterJob("Usenet Backfill",
+			"Walks each group's history backward to fill the retention window").MarkOffPeak()
 		p.buildJob = c.Scheduler.RegisterJob("NZB Builder",
 			"Assembles complete article sets into downloadable NZB files").MarkOffPeak()
 		p.tagJob = c.Scheduler.RegisterJob("NZB Tag Fill",
@@ -81,10 +84,12 @@ func (p *Plugin) Provision(c *core.Core) error {
 		p.pruneJob = c.Scheduler.RegisterJob("NZB Prune",
 			"Deletes NZBs older than the retention window")
 		p.crawlJob.SetTrigger(func() { go p.runCrawl(p.ctx) })
+		p.backfillJob.SetTrigger(func() { go p.runBackfill(p.ctx) })
 		p.buildJob.SetTrigger(func() { go p.runBuild(p.ctx) })
 		p.tagJob.SetTrigger(func() { go p.runTagFill(p.ctx) })
 		p.pruneJob.SetTrigger(func() { go p.runPrune(p.ctx) })
 		p.svc.triggerCrawl = func() { go p.runCrawl(p.ctx) }
+		p.svc.triggerBackfill = func() { go p.runBackfill(p.ctx) }
 	}
 	return nil
 }
@@ -96,7 +101,10 @@ func (p *Plugin) Start(ctx context.Context) error {
 	}
 	p.seedServer(ctx)
 	interval := time.Duration(p.cfg.CrawlIntervalMin) * time.Minute
+	backfillInterval := time.Duration(p.cfg.BackfillIntervalMin) * time.Minute
 	p.core.Scheduler.RunLoop(ctx, p.crawlJob, time.Minute, interval, p.runCrawl)
+	// Boot backfill after the forward crawl has had a pass to seed watermarks.
+	p.core.Scheduler.RunLoop(ctx, p.backfillJob, 3*time.Minute, backfillInterval, p.runBackfill)
 	p.core.Scheduler.RunLoop(ctx, p.buildJob, 90*time.Second, interval, p.runBuild)
 	p.core.Scheduler.RunLoop(ctx, p.tagJob, 5*time.Minute, 6*time.Hour, p.runTagFill)
 	p.core.Scheduler.RunLoop(ctx, p.pruneJob, 10*time.Minute, 24*time.Hour, p.runPrune)

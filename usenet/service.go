@@ -13,8 +13,9 @@ var errNoServer = errors.New("usenet: no server configured")
 // store + NNTP helpers. One instance is published on the core extension registry
 // under both names in the web/all process.
 type service struct {
-	store        *store
-	triggerCrawl func() // set by the plugin in the worker/all process
+	store           *store
+	triggerCrawl    func() // set by the plugin in the worker/all process
+	triggerBackfill func() // set by the plugin in the worker/all process
 }
 
 var (
@@ -94,4 +95,14 @@ func (s *service) TriggerCrawl() {
 	if s.triggerCrawl != nil {
 		s.triggerCrawl()
 	}
+}
+
+func (s *service) TriggerBackfill() {
+	if s.triggerBackfill != nil {
+		s.triggerBackfill()
+	}
+}
+
+func (s *service) ResetBackfill(ctx context.Context, name string) error {
+	return s.store.resetBackfill(ctx, name)
 }

@@ -111,6 +111,7 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 
 	batch := p.cfg.Batch
 	staged, scanned, batchNum := 0, 0, 0
+	var maxDate time.Time
 	for i := start; i <= high; i += batch {
 		if ctx.Err() != nil {
 			break
@@ -127,6 +128,9 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 			return staged, err
 		}
 		scanned += len(ovs)
+		if d := newestDate(ovs); d.After(maxDate) {
+			maxDate = d
+		}
 		arts := parseOverviews(ovs, g.Name, cutoff)
 		if len(arts) > 0 {
 			n, err := p.st.stageArticles(ctx, arts)
@@ -139,7 +143,9 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 			p.crawlJob.Log("%s: scanned %d, staged %d (article %d of %d)", g.Name, scanned, staged, end, high)
 		}
 	}
-	if err := p.st.updateGroupState(ctx, g.Name, int64(low), int64(high)); err != nil {
+	// start is the bottom of this run's forward window; it seeds back_watermark on
+	// the first crawl so backfill knows where history begins below it.
+	if err := p.st.updateGroupState(ctx, g.Name, int64(low), int64(high), int64(start), maxDate); err != nil {
 		return staged, err
 	}
 	return staged, nil
@@ -224,13 +230,44 @@ func (s *store) stageArticles(ctx context.Context, arts []stagedArticle) (int, e
 	return n, err
 }
 
-func (s *store) updateGroupState(ctx context.Context, name string, low, high int64) error {
+func (s *store) updateGroupState(ctx context.Context, name string, low, high, start int64, hwDate time.Time) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var hw sql.NullTime
+		if !hwDate.IsZero() {
+			hw = sql.NullTime{Time: hwDate, Valid: true}
+		}
 		_, err := tx.ExecContext(ctx,
 			`UPDATE newsgroups
 			   SET high_watermark = GREATEST(high_watermark, $2),
-			       server_low = $3, server_high = $4, last_crawl = now()
-			 WHERE name = $1`, name, high, low, high)
+			       server_low = $3, server_high = $4, last_crawl = now(),
+			       back_watermark = COALESCE(back_watermark, $5),
+			       high_watermark_date = COALESCE($6, high_watermark_date)
+			 WHERE name = $1`, name, high, low, high, start, hw)
 		return err
 	})
+}
+
+// newestDate / oldestDate scan an overview batch for its date bounds (used to
+// stamp watermarks and to detect the retention horizon during backfill).
+func newestDate(ovs []nntp.MessageOverview) time.Time {
+	var t time.Time
+	for _, ov := range ovs {
+		if ov.Date.After(t) {
+			t = ov.Date
+		}
+	}
+	return t
+}
+
+func oldestDate(ovs []nntp.MessageOverview) time.Time {
+	var t time.Time
+	for _, ov := range ovs {
+		if ov.Date.IsZero() {
+			continue
+		}
+		if t.IsZero() || ov.Date.Before(t) {
+			t = ov.Date
+		}
+	}
+	return t
 }

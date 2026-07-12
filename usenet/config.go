@@ -9,6 +9,10 @@ type Config struct {
 	Batch               int          `json:"batch"`                  // article-number span per OVER request (default 3000)
 	MaxGroups           int          `json:"max_groups"`             // cap active groups crawled per run (default 20)
 	MaxArticlesPerGroup int          `json:"max_articles_per_group"` // cap the first-pass volume so a busy group can't pull millions (default 20000)
+
+	SkipBackfill          bool `json:"skip_backfill"`            // "new articles only" — disable the backfill job
+	BackfillBatchesPerRun int  `json:"backfill_batches_per_run"` // cap backward batches per backfill pass, across all groups (default 10)
+	BackfillIntervalMin   int  `json:"backfill_interval_min"`    // backfill cadence (default 30)
 }
 
 type ServerConfig struct {
@@ -34,6 +38,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MaxArticlesPerGroup <= 0 {
 		c.MaxArticlesPerGroup = 20000
+	}
+	if c.BackfillBatchesPerRun <= 0 {
+		c.BackfillBatchesPerRun = 10
+	}
+	if c.BackfillIntervalMin <= 0 {
+		c.BackfillIntervalMin = 30
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 119
