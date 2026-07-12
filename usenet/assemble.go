@@ -48,6 +48,10 @@ func (p *Plugin) runBuild(ctx context.Context) {
 		if len(arts) == 0 || !isComplete(arts) {
 			continue // not actually complete yet — leave staged for next round
 		}
+		if isJunkTitle(k.Base) {
+			_ = p.st.deleteStaged(ctx, k.Group, k.Base) // drop, don't build
+			continue
+		}
 		gz, err := gzipBytes(buildNZB(arts))
 		if err != nil {
 			p.core.Errors.Report(ctx, "usenet/build-gzip", err)

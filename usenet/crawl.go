@@ -169,6 +169,9 @@ func parseOverviews(ovs []nntp.MessageOverview, group string, cutoff time.Time) 
 			continue
 		}
 		base, pn, tp, seg, fn, tf, fp := parseSubject(ov.Subject)
+		if isJunkTitle(base) {
+			continue // obfuscated random-token post — never index it
+		}
 		out = append(out, stagedArticle{
 			MessageID: ov.MessageId, Subject: ov.Subject, BaseSubject: base,
 			Poster: ov.From, Bytes: int64(ov.Bytes), Posted: ov.Date, Group: group,

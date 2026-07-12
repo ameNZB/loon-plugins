@@ -195,7 +195,18 @@ func (p *Plugin) runPrune(ctx context.Context) {
 		return
 	}
 	staged, _ := p.st.pruneStaging(ctx)
-	p.pruneJob.Log("pruned %d NZBs (older than %dd) and %d stale staged articles", n, cfg.RetentionDays, staged)
+	// Sweep junk left over from before ingest filtering (obfuscated random-token
+	// titles that assembled into garbage releases / clog staging).
+	junkNzbs, err := p.st.deleteJunkNzbs(ctx)
+	if err != nil {
+		p.core.Errors.Report(ctx, "usenet/prune-junk-nzbs", err)
+	}
+	junkStaged, err := p.st.deleteJunkStaged(ctx)
+	if err != nil {
+		p.core.Errors.Report(ctx, "usenet/prune-junk-staged", err)
+	}
+	p.pruneJob.Log("pruned %d NZBs (older than %dd) + %d stale staged; swept %d junk NZBs + %d junk staged",
+		n, cfg.RetentionDays, staged, junkNzbs, junkStaged)
 	p.pruneJob.SetIdle(time.Now().Add(24 * time.Hour))
 }
 

@@ -422,6 +422,75 @@ func (s *store) pruneNzbs(ctx context.Context, days int) (int64, error) {
 	return n, err
 }
 
+// deleteJunkNzbs removes already-built NZBs whose title is junk (rows from
+// before junk filtering, or that slipped through). Detection is Go-side, so we
+// scan titles then delete by id in chunks.
+func (s *store) deleteJunkNzbs(ctx context.Context) (int, error) {
+	removed := 0
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var rows []struct {
+			ID    int64  `db:"id"`
+			Title string `db:"title"`
+		}
+		if err := tx.SelectContext(ctx, &rows, `SELECT id, title FROM nzbs`); err != nil {
+			return err
+		}
+		var ids []int64
+		for _, r := range rows {
+			if isJunkTitle(r.Title) {
+				ids = append(ids, r.ID)
+			}
+		}
+		for start := 0; start < len(ids); start += 1000 {
+			end := min(start+1000, len(ids))
+			q, args, err := sqlx.In(`DELETE FROM nzbs WHERE id IN (?)`, ids[start:end])
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, tx.Rebind(q), args...); err != nil {
+				return err
+			}
+		}
+		removed = len(ids)
+		return nil
+	})
+	return removed, err
+}
+
+// deleteJunkStaged removes staged articles whose base_subject is junk (the
+// backlog from before ingest filtering). Distinct bases are far fewer than
+// rows; deleted in chunks.
+func (s *store) deleteJunkStaged(ctx context.Context) (int64, error) {
+	var deleted int64
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var bases []string
+		if err := tx.SelectContext(ctx, &bases, `SELECT DISTINCT base_subject FROM articles`); err != nil {
+			return err
+		}
+		var junk []string
+		for _, b := range bases {
+			if isJunkTitle(b) {
+				junk = append(junk, b)
+			}
+		}
+		for start := 0; start < len(junk); start += 1000 {
+			end := min(start+1000, len(junk))
+			q, args, err := sqlx.In(`DELETE FROM articles WHERE base_subject IN (?)`, junk[start:end])
+			if err != nil {
+				return err
+			}
+			res, err := tx.ExecContext(ctx, tx.Rebind(q), args...)
+			if err != nil {
+				return err
+			}
+			n, _ := res.RowsAffected()
+			deleted += n
+		}
+		return nil
+	})
+	return deleted, err
+}
+
 func (s *store) pruneStaging(ctx context.Context) (int64, error) {
 	var n int64
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
