@@ -26,6 +26,10 @@ func (s *service) Search(ctx context.Context, q string, limit int) ([]pluginapi.
 	return s.store.searchNzbs(ctx, q, limit)
 }
 
+func (s *service) Browse(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
+	return s.store.browseNzbs(ctx, group, limit)
+}
+
 func (s *service) Groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {
 	return s.store.groups(ctx)
 }
@@ -76,6 +80,10 @@ func (s *service) AllGroups(ctx context.Context, query string, limit int) ([]plu
 
 func (s *service) GroupCount(ctx context.Context) (int, error) {
 	return s.store.groupCount(ctx)
+}
+
+func (s *service) Stats(ctx context.Context) (pluginapi.IndexStats, error) {
+	return s.store.stats(ctx)
 }
 
 func (s *service) SetGroupActive(ctx context.Context, name string, active bool) error {

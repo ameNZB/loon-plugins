@@ -17,6 +17,17 @@ import (
 type store struct{ db *core.SchemaDB }
 
 func (s *store) searchNzbs(ctx context.Context, q string, limit int) ([]pluginapi.Release, error) {
+	return s.queryReleases(ctx, `title ILIKE '%' || $1 || '%'`, q, limit)
+}
+
+func (s *store) browseNzbs(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
+	return s.queryReleases(ctx, `($1 = '' OR group_name = $1)`, group, limit)
+}
+
+// queryReleases lists completed NZBs newest-first. cond is a fixed literal
+// referencing $1 (the search term or group name); arg flows through the
+// placeholder, so there is no injection despite the concatenation.
+func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) ([]pluginapi.Release, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -38,8 +49,8 @@ func (s *store) searchNzbs(ctx context.Context, q string, limit int) ([]pluginap
 			`SELECT id, title, size, posted_at, group_name,
 			        resolution, source, video_codec, audio, language
 			 FROM nzbs
-			 WHERE status = 'completed' AND title ILIKE '%' || $1 || '%'
-			 ORDER BY COALESCE(posted_at, created_at) DESC LIMIT $2`, q, limit)
+			 WHERE status = 'completed' AND `+cond+`
+			 ORDER BY COALESCE(posted_at, created_at) DESC LIMIT $2`, arg, limit)
 	})
 	if err != nil {
 		return nil, err
@@ -56,6 +67,48 @@ func (s *store) searchNzbs(ctx context.Context, q string, limit int) ([]pluginap
 		}
 	}
 	return out, nil
+}
+
+// stats returns crawl progress: total NZBs, total staged articles, and per
+// active-group status (NZBs, staged, last crawl, watermark vs server high).
+func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {
+	var st pluginapi.IndexStats
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		if err := tx.GetContext(ctx, &st.TotalNZBs, `SELECT COUNT(*) FROM nzbs`); err != nil {
+			return err
+		}
+		if err := tx.GetContext(ctx, &st.TotalStaged, `SELECT COUNT(*) FROM articles`); err != nil {
+			return err
+		}
+		type row struct {
+			Name       string       `db:"name"`
+			NZBs       int          `db:"nzbs"`
+			Staged     int          `db:"staged"`
+			LastCrawl  sql.NullTime `db:"last_crawl"`
+			Watermark  int64        `db:"high_watermark"`
+			ServerHigh int64        `db:"server_high"`
+		}
+		var rows []row
+		if err := tx.SelectContext(ctx, &rows,
+			`SELECT g.name, g.high_watermark, g.server_high, g.last_crawl,
+			        (SELECT COUNT(*) FROM nzbs n WHERE n.group_name = g.name) AS nzbs,
+			        (SELECT COUNT(*) FROM articles a WHERE a.group_name = g.name) AS staged
+			 FROM newsgroups g WHERE g.active = TRUE ORDER BY g.name`); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			gs := pluginapi.GroupStat{
+				Name: r.Name, NZBs: r.NZBs, Staged: r.Staged,
+				HighWatermark: r.Watermark, ServerHigh: r.ServerHigh,
+			}
+			if r.LastCrawl.Valid {
+				gs.LastCrawl = r.LastCrawl.Time
+			}
+			st.Groups = append(st.Groups, gs)
+		}
+		return nil
+	})
+	return st, err
 }
 
 func (s *store) groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {

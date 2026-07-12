@@ -30,6 +30,23 @@ type GroupInfo struct {
 	NZBs   int64
 }
 
+// GroupStat is the crawl status of one active group.
+type GroupStat struct {
+	Name          string
+	NZBs          int
+	Staged        int // articles waiting in staging (not yet assembled)
+	LastCrawl     time.Time
+	HighWatermark int64 // highest article number crawled
+	ServerHigh    int64 // server's highest article number
+}
+
+// IndexStats summarizes what the indexer has pulled so far.
+type IndexStats struct {
+	TotalNZBs   int
+	TotalStaged int
+	Groups      []GroupStat // active groups
+}
+
 // Server is the NNTP server configuration the setup wizard edits.
 type Server struct {
 	Host     string
@@ -43,6 +60,8 @@ type Server struct {
 // UsenetIndex is the public read surface — registered in the web/all process.
 type UsenetIndex interface {
 	Search(ctx context.Context, query string, limit int) ([]Release, error)
+	// Browse lists recent releases, optionally filtered to one group (empty = all).
+	Browse(ctx context.Context, group string, limit int) ([]Release, error)
 	Groups(ctx context.Context) ([]GroupInfo, error)
 	// NZB returns the decompressed .nzb bytes + a suggested download filename.
 	NZB(ctx context.Context, id int64) (data []byte, filename string, err error)
@@ -57,7 +76,8 @@ type UsenetAdmin interface {
 	// AllGroups returns groups for the picker, active first. query filters by
 	// name substring (case-insensitive); empty query returns the first `limit`.
 	AllGroups(ctx context.Context, query string, limit int) ([]GroupInfo, error)
-	GroupCount(ctx context.Context) (int, error) // total groups fetched (for "showing N of M")
+	GroupCount(ctx context.Context) (int, error)   // total groups fetched (for "showing N of M")
+	Stats(ctx context.Context) (IndexStats, error) // crawl progress: totals + per-active-group status
 	SetGroupActive(ctx context.Context, name string, active bool) error
 	TriggerCrawl() // fire the crawler job now
 }

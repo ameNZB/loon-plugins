@@ -74,14 +74,17 @@ func (p *Plugin) runCrawl(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		p.crawlJob.Log("crawling %s…", g.Name)
 		n, err := p.crawlGroup(ctx, conn, g, cutoff)
 		if err != nil {
 			p.core.Errors.Report(ctx, "usenet/crawl", fmt.Errorf("%s: %w", g.Name, err))
+			p.crawlJob.Log("%s: error — %v", g.Name, err)
 			continue
 		}
 		staged += n
+		p.crawlJob.Log("%s: staged %d new article(s)", g.Name, n)
 	}
-	p.crawlJob.Log("crawled %d group(s), staged %d new articles", len(groups), staged)
+	p.crawlJob.Log("crawl complete: %d group(s), %d new articles staged", len(groups), staged)
 	p.crawlJob.SetIdle(p.nextCrawl())
 	go p.runBuild(ctx) // assemble what just landed
 }
@@ -107,7 +110,7 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 	}
 
 	batch := p.cfg.Batch
-	staged := 0
+	staged, scanned, batchNum := 0, 0, 0
 	for i := start; i <= high; i += batch {
 		if ctx.Err() != nil {
 			break
@@ -123,6 +126,7 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 		if err != nil {
 			return staged, err
 		}
+		scanned += len(ovs)
 		arts := parseOverviews(ovs, g.Name, cutoff)
 		if len(arts) > 0 {
 			n, err := p.st.stageArticles(ctx, arts)
@@ -130,6 +134,9 @@ func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cu
 				return staged, err
 			}
 			staged += n
+		}
+		if batchNum++; batchNum%5 == 0 {
+			p.crawlJob.Log("%s: scanned %d, staged %d (article %d of %d)", g.Name, scanned, staged, end, high)
 		}
 	}
 	if err := p.st.updateGroupState(ctx, g.Name, int64(low), int64(high)); err != nil {
