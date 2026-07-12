@@ -53,6 +53,7 @@ func (p *Plugin) registerViews(c *core.Core) error {
 	if err := c.RegisterView(core.View{
 		Slug: "stats", Title: "Site stats", Slot: core.SlotSitePage,
 		// Public:false + zero MinRole = any logged-in user may view.
+		Nav: core.NavHint{Group: "Community", Weight: 20},
 		Render: func(_ *gin.Context) (template.HTML, error) {
 			return p.renderPage()
 		},
