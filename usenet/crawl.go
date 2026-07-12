@@ -41,6 +41,7 @@ func (p *Plugin) runCrawl(ctx context.Context) {
 	}
 	defer p.crawlMu.Unlock()
 	p.crawlJob.SetRunning()
+	cfg := p.effective(ctx)
 
 	srv, ok, err := p.st.getServer(ctx)
 	if err != nil {
@@ -53,7 +54,7 @@ func (p *Plugin) runCrawl(ctx context.Context) {
 		p.crawlJob.SetIdle(p.nextCrawl())
 		return
 	}
-	groups, err := p.st.activeGroups(ctx, p.cfg.MaxGroups)
+	groups, err := p.st.activeGroups(ctx, cfg.MaxGroups)
 	if err != nil {
 		p.crawlJob.SetError(err.Error())
 		p.core.Errors.Report(ctx, "usenet/crawl-groups", err)
@@ -73,14 +74,14 @@ func (p *Plugin) runCrawl(ctx context.Context) {
 	}
 	defer conn.Quit()
 
-	cutoff := time.Now().AddDate(0, 0, -p.cfg.RetentionDays)
+	cutoff := time.Now().AddDate(0, 0, -cfg.RetentionDays)
 	staged := 0
 	for _, g := range groups {
 		if ctx.Err() != nil {
 			return
 		}
 		p.crawlJob.Log("crawling %s…", g.Name)
-		n, err := p.crawlGroup(ctx, conn, g, cutoff)
+		n, err := p.crawlGroup(ctx, conn, g, cutoff, cfg)
 		if err != nil {
 			p.core.Errors.Report(ctx, "usenet/crawl", fmt.Errorf("%s: %w", g.Name, err))
 			p.crawlJob.Log("%s: error — %v", g.Name, err)
@@ -101,20 +102,20 @@ func (p *Plugin) nextCrawl() time.Time {
 // crawlGroup pulls new overviews for one group into staging and advances its
 // watermark. Re-selects the group before each Overview (the connection is
 // stateful and shared across groups within the run).
-func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cutoff time.Time) (int, error) {
+func (p *Plugin) crawlGroup(ctx context.Context, conn *nntp.Conn, g groupRow, cutoff time.Time, cfg Config) (int, error) {
 	_, low, high, err := conn.Group(g.Name)
 	if err != nil {
 		return 0, err
 	}
 	start := int(g.HighWatermark) + 1
 	if g.HighWatermark == 0 {
-		start = high - p.cfg.MaxArticlesPerGroup + 1 // first pass: cap the volume
+		start = high - cfg.MaxArticlesPerGroup + 1 // first pass: cap the volume
 	}
 	if start < low {
 		start = low
 	}
 
-	batch := p.cfg.Batch
+	batch := cfg.Batch
 	staged, scanned, batchNum := 0, 0, 0
 	var maxDate time.Time
 	for i := start; i <= high; i += batch {

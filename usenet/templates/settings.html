@@ -3,7 +3,7 @@
 
 <div class="card">
     <h2>NNTP server</h2>
-    <form method="post" action="/admin/p/usenet/server">
+    <form method="post" action="/admin/settings/usenet/server">
         <label>Host</label>
         <input type="text" name="host" value="{{.Server.Host}}" placeholder="news.example.com">
         <div style="display:flex;gap:1rem;margin-top:.5rem">
@@ -19,7 +19,26 @@
         </label>
         <div style="margin-top:.75rem;display:flex;gap:.5rem">
             <button class="btn btn-primary" type="submit">Save</button>
-            <button class="btn btn-outline-secondary" type="submit" formaction="/admin/p/usenet/test">Test connection</button>
+            <button class="btn btn-outline-secondary" type="submit" formaction="/admin/settings/usenet/test">Test connection</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h2>Indexing</h2>
+    <form method="post" action="/admin/settings/usenet/knobs">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem">
+            {{range .Knobs}}
+            <div>
+                <label title="{{.Help}}">{{.Label}}</label>
+                <input type="number" min="1" name="{{.Key}}" value="{{.Value}}">
+                <div class="text-muted" style="font-size:.75rem;margin-top:.2rem">{{.Help}}</div>
+            </div>
+            {{end}}
+        </div>
+        <div style="margin-top:.75rem">
+            <button class="btn btn-primary" type="submit">Save settings</button>
+            <span class="text-muted small">applied on each job's next run</span>
         </div>
     </form>
 </div>
@@ -27,13 +46,10 @@
 <div class="card">
     <h2>Newsgroups</h2>
     <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
-        <form method="post" action="/admin/p/usenet/fetch-groups" style="display:inline">
+        <form method="post" action="/admin/settings/usenet/fetch-groups" style="display:inline">
             <button class="btn btn-outline-primary btn-sm" type="submit">Fetch group list</button>
         </form>
-        <form method="post" action="/admin/p/usenet/crawl" style="display:inline">
-            <button class="btn btn-outline-primary btn-sm" type="submit">Crawl now</button>
-        </form>
-        <form method="get" action="/admin/p/usenet" style="display:flex;gap:.5rem;flex:1;min-width:220px">
+        <form method="get" action="/admin/settings" style="display:flex;gap:.5rem;flex:1;min-width:220px">
             <input type="search" name="gq" value="{{.GroupQuery}}" placeholder="search groups…" style="flex:1">
             <button class="btn btn-outline-secondary btn-sm" type="submit">Search</button>
         </form>
@@ -48,7 +64,7 @@
                     <td><code>{{.Name}}</code></td>
                     <td class="text-end">{{.NZBs}}</td>
                     <td>
-                        <form method="post" action="/admin/p/usenet/group" style="display:inline">
+                        <form method="post" action="/admin/settings/usenet/group" style="display:inline">
                             <input type="hidden" name="name" value="{{.Name}}">
                             <input type="hidden" name="active" value="{{if .Active}}false{{else}}true{{end}}">
                             <input type="hidden" name="gq" value="{{$.GroupQuery}}">

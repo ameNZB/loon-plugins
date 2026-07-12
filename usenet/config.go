@@ -1,7 +1,12 @@
 package usenet
 
+import "strconv"
+
 // Config is the plugins.usenet section of config.yml. The server here seeds the
 // servers table on first boot if it's empty; after that the wizard owns it.
+// The numeric knobs are DEFAULTS — rows in the plugin's settings table
+// (edited on the host's /admin/settings page) override them at job run time
+// via withOverrides.
 type Config struct {
 	Server              ServerConfig `json:"server"`
 	RetentionDays       int          `json:"retention_days"`         // keep the last N days (default 3)
@@ -48,4 +53,31 @@ func (c *Config) applyDefaults() {
 	if c.Server.Port == 0 {
 		c.Server.Port = 119
 	}
+}
+
+// knobFields maps admin-editable setting keys to the Config field each
+// overrides. One place to keep the settings form, the save action, and the
+// override resolution in sync.
+func (c *Config) knobFields() map[string]*int {
+	return map[string]*int{
+		"retention_days":           &c.RetentionDays,
+		"batch":                    &c.Batch,
+		"max_groups":               &c.MaxGroups,
+		"max_articles_per_group":   &c.MaxArticlesPerGroup,
+		"backfill_batches_per_run": &c.BackfillBatchesPerRun,
+	}
+}
+
+// withOverrides overlays DB settings (positive integers only) onto the config
+// defaults. Invalid or missing values keep the default.
+func (c Config) withOverrides(s map[string]string) Config {
+	out := c
+	for key, dst := range out.knobFields() {
+		if raw, ok := s[key]; ok {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				*dst = n
+			}
+		}
+	}
+	return out
 }

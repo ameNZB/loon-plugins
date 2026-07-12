@@ -70,6 +70,12 @@ func (p *Plugin) Provision(c *core.Core) error {
 	p.cfg.applyDefaults()
 	p.svc = &service{store: p.st}
 
+	// Contribute indexer totals to the stats snapshot (collected in the worker
+	// process; registering everywhere is harmless).
+	if err := pluginapi.RegisterStats(c, statHook{store: p.st}); err != nil {
+		return err
+	}
+
 	// web/all: publish the read + admin capabilities the host pages consume,
 	// and register the plugin-owned admin views (setup wizard + crawl status)
 	// the host wraps in its own chrome.
@@ -163,20 +169,33 @@ func (p *Plugin) seedServer(ctx context.Context) {
 	}
 }
 
+// effective returns the config with any admin-edited settings overlaid (the
+// /admin/settings knobs). Jobs call this at run start so edits apply on the
+// next run without a restart. Falls back to the boot config on read error.
+func (p *Plugin) effective(ctx context.Context) Config {
+	s, err := p.st.getSettings(ctx)
+	if err != nil {
+		p.core.Errors.Report(ctx, "usenet/settings", err)
+		return p.cfg
+	}
+	return p.cfg.withOverrides(s)
+}
+
 // runPrune deletes NZBs past the retention window + stale staged articles.
 func (p *Plugin) runPrune(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
 	p.pruneJob.SetRunning()
-	n, err := p.st.pruneNzbs(ctx, p.cfg.RetentionDays)
+	cfg := p.effective(ctx)
+	n, err := p.st.pruneNzbs(ctx, cfg.RetentionDays)
 	if err != nil {
 		p.pruneJob.SetError(err.Error())
 		p.core.Errors.Report(ctx, "usenet/prune", err)
 		return
 	}
 	staged, _ := p.st.pruneStaging(ctx)
-	p.pruneJob.Log("pruned %d NZBs (older than %dd) and %d stale staged articles", n, p.cfg.RetentionDays, staged)
+	p.pruneJob.Log("pruned %d NZBs (older than %dd) and %d stale staged articles", n, cfg.RetentionDays, staged)
 	p.pruneJob.SetIdle(time.Now().Add(24 * time.Hour))
 }
 

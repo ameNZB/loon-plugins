@@ -266,6 +266,36 @@ func (s *store) setGroupActive(ctx context.Context, name string, active bool) er
 	})
 }
 
+// ── plugin settings (admin-editable knob overrides) ─────────────────
+
+func (s *store) getSettings(ctx context.Context) (map[string]string, error) {
+	out := map[string]string{}
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var rows []struct {
+			Key   string `db:"key"`
+			Value string `db:"value"`
+		}
+		if err := tx.SelectContext(ctx, &rows, `SELECT key, value FROM settings`); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			out[r.Key] = r.Value
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (s *store) setSetting(ctx context.Context, key, value string) error {
+	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
+			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+			key, value)
+		return err
+	})
+}
+
 // ── backfill ────────────────────────────────────────────────────────
 
 // backfillRow is one active group that still has history to fetch below its

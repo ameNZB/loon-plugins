@@ -1,0 +1,31 @@
+{{/* Override for the "Usenet" job-group card on the host jobs page: the two
+     crawl jobs with live activity, the index totals, and quick controls that
+     post to the crawlers page's actions. */}}
+<div class="table-responsive">
+    <table class="table table-dark table-sm align-middle">
+        <thead><tr><th>Job</th><th>Status</th><th>Last activity</th></tr></thead>
+        <tbody>
+        {{range .Jobs}}
+            <tr>
+                <td><code>{{.Name}}</code></td>
+                <td>{{if .Running}}<span class="badge bg-success">running</span>{{else}}<span class="badge bg-secondary">{{.Status}}</span>{{end}}</td>
+                <td class="small text-muted">{{if .Activity}}{{.Activity}}{{else}}—{{end}}</td>
+            </tr>
+        {{end}}
+        </tbody>
+    </table>
+</div>
+<div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.25rem">
+    <span class="text-muted small">
+        {{with .Stats}}{{.TotalNZBs}} NZBs · {{.TotalStaged}} staged · {{.TotalBackfillRemaining}} to backfill{{end}}
+    </span>
+    <div style="margin-left:auto;display:flex;gap:.5rem">
+        <form method="post" action="/admin/p/crawlers/crawl" style="display:inline">
+            <button class="btn btn-sm btn-outline-primary py-0" type="submit">Run crawl</button>
+        </form>
+        <form method="post" action="/admin/p/crawlers/backfill" style="display:inline">
+            <button class="btn btn-sm btn-outline-primary py-0" type="submit">Run backfill</button>
+        </form>
+        <a class="btn btn-sm btn-outline-secondary py-0" href="/admin/p/crawlers">details →</a>
+    </div>
+</div>

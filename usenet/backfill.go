@@ -23,8 +23,9 @@ func (p *Plugin) runBackfill(ctx context.Context) {
 	}
 	defer p.backfillMu.Unlock()
 	p.backfillJob.SetRunning()
+	cfg := p.effective(ctx)
 
-	if p.cfg.SkipBackfill {
+	if cfg.SkipBackfill {
 		p.backfillJob.Log("backfill disabled (skip_backfill) — new articles only")
 		p.backfillJob.SetIdle(p.nextBackfill())
 		return
@@ -41,7 +42,7 @@ func (p *Plugin) runBackfill(ctx context.Context) {
 		p.backfillJob.SetIdle(p.nextBackfill())
 		return
 	}
-	groups, err := p.st.groupsNeedingBackfill(ctx, p.cfg.MaxGroups)
+	groups, err := p.st.groupsNeedingBackfill(ctx, cfg.MaxGroups)
 	if err != nil {
 		p.backfillJob.SetError(err.Error())
 		p.core.Errors.Report(ctx, "usenet/backfill-groups", err)
@@ -61,14 +62,14 @@ func (p *Plugin) runBackfill(ctx context.Context) {
 	}
 	defer conn.Quit()
 
-	cutoff := time.Now().AddDate(0, 0, -p.cfg.RetentionDays)
-	budget := p.cfg.BackfillBatchesPerRun
+	cutoff := time.Now().AddDate(0, 0, -cfg.RetentionDays)
+	budget := cfg.BackfillBatchesPerRun
 	totalStaged := 0
 	for _, g := range groups {
 		if ctx.Err() != nil || budget <= 0 {
 			break
 		}
-		used, staged, err := p.backfillGroup(ctx, conn, g, cutoff, budget)
+		used, staged, err := p.backfillGroup(ctx, conn, g, cutoff, budget, cfg)
 		budget -= used
 		totalStaged += staged
 		if err != nil {
@@ -91,7 +92,7 @@ func (p *Plugin) nextBackfill() time.Time {
 // backfillGroup fetches batches below the group's back_watermark, advancing it
 // downward. Returns batches consumed and articles staged. Marks the group done
 // when it reaches the server's oldest article or crosses the retention horizon.
-func (p *Plugin) backfillGroup(ctx context.Context, conn *nntp.Conn, g backfillRow, cutoff time.Time, budget int) (used, staged int, err error) {
+func (p *Plugin) backfillGroup(ctx context.Context, conn *nntp.Conn, g backfillRow, cutoff time.Time, budget int, cfg Config) (used, staged int, err error) {
 	if _, low, _, err := conn.Group(g.Name); err != nil {
 		return 0, 0, err
 	} else if int64(low) > g.ServerLow {
@@ -105,7 +106,7 @@ func (p *Plugin) backfillGroup(ctx context.Context, conn *nntp.Conn, g backfillR
 		return 0, 0, p.st.markBackfillDone(ctx, g.Name)
 	}
 
-	batch := int64(p.cfg.Batch)
+	batch := int64(cfg.Batch)
 	for used < budget {
 		if ctx.Err() != nil {
 			break

@@ -19,9 +19,30 @@ type service struct {
 }
 
 var (
-	_ pluginapi.UsenetIndex = (*service)(nil)
-	_ pluginapi.UsenetAdmin = (*service)(nil)
+	_ pluginapi.UsenetIndex     = (*service)(nil)
+	_ pluginapi.UsenetAdmin     = (*service)(nil)
+	_ pluginapi.StatContributor = (statHook)(statHook{})
 )
+
+// statHook implements pluginapi.StatContributor on its own type — it can't
+// live on service because UsenetAdmin already claims the Stats method name
+// with a different signature. The indexer's totals feed the stats plugin's
+// snapshot (and through it the host's site-stats page).
+type statHook struct{ store *store }
+
+func (h statHook) StatsName() string { return "usenet" }
+
+func (h statHook) Stats(ctx context.Context) ([]pluginapi.Stat, error) {
+	st, err := h.store.stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []pluginapi.Stat{
+		{Key: "usenet.nzbs", Label: "NZBs indexed", Value: int64(st.TotalNZBs)},
+		{Key: "usenet.staged", Label: "Articles staged", Value: int64(st.TotalStaged)},
+		{Key: "usenet.groups", Label: "Active newsgroups", Value: int64(len(st.Groups))},
+	}, nil
+}
 
 func (s *service) Search(ctx context.Context, q string, limit int) ([]pluginapi.Release, error) {
 	return s.store.searchNzbs(ctx, q, limit)

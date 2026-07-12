@@ -19,17 +19,24 @@ import (
 	"github.com/ameNZB/loon-plugins/pluginapi"
 )
 
-// The plugin owns its admin pages: the setup wizard (settings view) and the
-// live crawl/backfill status page (status view). Each Render returns an HTML
-// fragment from the embedded templates below; the HOST wraps it in its own
-// layout/nav/theme via loon's AdminView seam, so the pages look native to any
-// site without the site writing usenet-specific handlers.
+// The plugin owns its admin UI through loon's view slots:
+//
+//   - a SETTINGS SECTION on the host's aggregated /admin/settings page —
+//     server credentials + the indexing knobs (retention, batch sizes, caps;
+//     persisted in the plugin's settings table, applied next run) + the
+//     newsgroup picker;
+//   - the CRAWLERS status page (coverage bars, live job activity, controls);
+//   - a JOBS WIDGET that overrides the default table for its "Usenet" job
+//     group on the host jobs page with a richer card.
+//
+// Each Render returns an HTML fragment from the embedded templates; the HOST
+// wraps it in its own layout/nav/theme.
 
 //go:embed templates/*.html
 var viewFS embed.FS
 
 const (
-	settingsURL = "/admin/p/usenet"
+	settingsURL = "/admin/settings"
 	crawlersURL = "/admin/p/crawlers"
 )
 
@@ -40,8 +47,8 @@ func (p *Plugin) registerViews(c *core.Core) error {
 	}
 	p.tmpl = t
 
-	if err := c.RegisterAdminView(core.AdminView{
-		Slug: "usenet", Title: "Usenet setup", Kind: core.ViewSettings,
+	if err := c.RegisterView(core.View{
+		Slug: "usenet", Title: "Usenet", Slot: core.SlotAdminSettings,
 		Render: func(gc *gin.Context) (template.HTML, error) {
 			srv, _, _ := p.st.getServer(gc.Request.Context())
 			return p.renderSettings(gc.Request.Context(), srv, gc.Query("gq"), gc.Query("msg"), gc.Query("err"))
@@ -49,27 +56,45 @@ func (p *Plugin) registerViews(c *core.Core) error {
 		Actions: map[string]func(*gin.Context) (template.HTML, error){
 			"server":       p.actionSaveServer,
 			"test":         p.actionTestServer,
+			"knobs":        p.actionSaveKnobs,
 			"fetch-groups": p.actionFetchGroups,
 			"group":        p.actionToggleGroup,
-			"crawl":        p.actionCrawl(settingsURL),
 		},
 	}); err != nil {
 		return err
 	}
 
-	return c.RegisterAdminView(core.AdminView{
-		Slug: "crawlers", Title: "Crawlers", Kind: core.ViewStatus,
+	if err := c.RegisterView(core.View{
+		Slug: "crawlers", Title: "Crawlers", Slot: core.SlotAdminPage,
 		Render: func(gc *gin.Context) (template.HTML, error) {
 			return p.renderCrawlers(gc.Request.Context(), gc.Query("msg"), gc.Query("err"))
 		},
 		Actions: map[string]func(*gin.Context) (template.HTML, error){
-			"crawl":    p.actionCrawl(crawlersURL),
-			"backfill": p.actionBackfill,
+			"crawl": func(gc *gin.Context) (template.HTML, error) {
+				p.svc.TriggerCrawl()
+				return redirect(gc, crawlersURL+"?msg="+url.QueryEscape("crawl triggered"))
+			},
+			"backfill": func(gc *gin.Context) (template.HTML, error) {
+				p.svc.TriggerBackfill()
+				return redirect(gc, crawlersURL+"?msg="+url.QueryEscape("backfill triggered"))
+			},
 			"reset-backfill": func(gc *gin.Context) (template.HTML, error) {
 				name := gc.PostForm("name")
 				_ = p.st.resetBackfill(gc.Request.Context(), name)
-				return redirect(gc, crawlersURL, "msg", "backfill re-armed for "+name)
+				return redirect(gc, crawlersURL+"?msg="+url.QueryEscape("backfill re-armed for "+name))
 			},
+		},
+	}); err != nil {
+		return err
+	}
+
+	// Jobs widget: a richer card for the "Usenet" job group (crawler +
+	// backfill) on the host jobs page. The "NZB" group keeps the host default —
+	// the two side by side demonstrate default vs override.
+	return c.RegisterView(core.View{
+		Slug: "usenet-jobs", Title: "Usenet jobs", Slot: core.SlotJobsWidget, Anchor: "Usenet",
+		Render: func(gc *gin.Context) (template.HTML, error) {
+			return p.renderJobsWidget(gc.Request.Context())
 		},
 	})
 }
@@ -82,20 +107,45 @@ func (p *Plugin) frag(name string, data any) (template.HTML, error) {
 	return template.HTML(buf.String()), nil
 }
 
-// redirect answers the action with a 303 back to the view; the empty fragment
-// tells the host the response is already written.
-func redirect(gc *gin.Context, base, key, msg string) (template.HTML, error) {
-	gc.Redirect(http.StatusSeeOther, base+"?"+key+"="+url.QueryEscape(msg))
+// redirect answers the action with a 303; the empty fragment tells the host
+// the response is already written.
+func redirect(gc *gin.Context, to string) (template.HTML, error) {
+	gc.Redirect(http.StatusSeeOther, to)
 	return "", nil
 }
 
-// ── settings view ───────────────────────────────────────────────────
+// settingsRedirect lands back on the usenet section of the settings page.
+func settingsRedirect(gc *gin.Context, key, msg string) (template.HTML, error) {
+	return redirect(gc, settingsURL+"?"+key+"="+url.QueryEscape(msg)+"#s-usenet")
+}
+
+// ── settings section ────────────────────────────────────────────────
+
+// knob is one editable numeric setting row in the settings form.
+type knob struct {
+	Key   string
+	Label string
+	Value int
+	Help  string
+}
+
+func (p *Plugin) knobs(ctx context.Context) []knob {
+	cfg := p.effective(ctx)
+	return []knob{
+		{"retention_days", "Retention (days)", cfg.RetentionDays, "keep the last N days of releases"},
+		{"batch", "Overview batch size", cfg.Batch, "article-number span per NNTP OVER request"},
+		{"max_groups", "Max groups per run", cfg.MaxGroups, "cap active groups crawled per pass"},
+		{"max_articles_per_group", "First-pass article cap", cfg.MaxArticlesPerGroup, "cap a new group's initial volume"},
+		{"backfill_batches_per_run", "Backfill batches per run", cfg.BackfillBatchesPerRun, "bounds one backfill pass across all groups"},
+	}
+}
 
 func (p *Plugin) renderSettings(ctx context.Context, srv pluginapi.Server, gq, msg, errMsg string) (template.HTML, error) {
 	groups, _ := p.st.allGroups(ctx, gq, 300)
 	total, _ := p.st.groupCount(ctx)
 	return p.frag("settings.html", map[string]any{
-		"Server": srv, "Groups": groups, "GroupQuery": gq,
+		"Server": srv, "Knobs": p.knobs(ctx),
+		"Groups": groups, "GroupQuery": gq,
 		"GroupTotal": total, "Shown": len(groups),
 		"Msg": msg, "Err": errMsg,
 	})
@@ -119,9 +169,9 @@ func formServer(gc *gin.Context) pluginapi.Server {
 
 func (p *Plugin) actionSaveServer(gc *gin.Context) (template.HTML, error) {
 	if err := p.st.saveServer(gc.Request.Context(), formServer(gc)); err != nil {
-		return redirect(gc, settingsURL, "err", err.Error())
+		return settingsRedirect(gc, "err", err.Error())
 	}
-	return redirect(gc, settingsURL, "msg", "server saved")
+	return settingsRedirect(gc, "msg", "server saved")
 }
 
 // actionTestServer re-renders the fragment with the SUBMITTED values (not a
@@ -134,34 +184,42 @@ func (p *Plugin) actionTestServer(gc *gin.Context) (template.HTML, error) {
 	return p.renderSettings(gc.Request.Context(), srv, "", "connection ok — click Save to keep it", "")
 }
 
+// actionSaveKnobs persists the numeric settings; they apply on each job's next
+// run (effective() overlays them onto the config defaults).
+func (p *Plugin) actionSaveKnobs(gc *gin.Context) (template.HTML, error) {
+	ctx := gc.Request.Context()
+	var cfg Config
+	for key := range cfg.knobFields() {
+		raw := strings.TrimSpace(gc.PostForm(key))
+		if raw == "" {
+			continue
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return settingsRedirect(gc, "err", key+" must be a positive number")
+		}
+		if err := p.st.setSetting(ctx, key, raw); err != nil {
+			return settingsRedirect(gc, "err", err.Error())
+		}
+	}
+	return settingsRedirect(gc, "msg", "settings saved — applied on each job's next run")
+}
+
 func (p *Plugin) actionFetchGroups(gc *gin.Context) (template.HTML, error) {
 	n, err := p.svc.FetchGroups(gc.Request.Context())
 	if err != nil {
-		return redirect(gc, settingsURL, "err", "fetch failed: "+err.Error())
+		return settingsRedirect(gc, "err", "fetch failed: "+err.Error())
 	}
-	return redirect(gc, settingsURL, "msg", "fetched "+strconv.Itoa(n)+" new group(s)")
+	return settingsRedirect(gc, "msg", "fetched "+strconv.Itoa(n)+" new group(s)")
 }
 
 func (p *Plugin) actionToggleGroup(gc *gin.Context) (template.HTML, error) {
 	_ = p.st.setGroupActive(gc.Request.Context(), gc.PostForm("name"), gc.PostForm("active") == "true")
-	dest := settingsURL
+	dest := settingsURL + "#s-usenet"
 	if gq := gc.PostForm("gq"); gq != "" {
-		dest += "?gq=" + url.QueryEscape(gq) // keep the current group search
+		dest = settingsURL + "?gq=" + url.QueryEscape(gq) + "#s-usenet" // keep the current group search
 	}
-	gc.Redirect(http.StatusSeeOther, dest)
-	return "", nil
-}
-
-func (p *Plugin) actionCrawl(backTo string) func(*gin.Context) (template.HTML, error) {
-	return func(gc *gin.Context) (template.HTML, error) {
-		p.svc.TriggerCrawl()
-		return redirect(gc, backTo, "msg", "crawl triggered")
-	}
-}
-
-func (p *Plugin) actionBackfill(gc *gin.Context) (template.HTML, error) {
-	p.svc.TriggerBackfill()
-	return redirect(gc, crawlersURL, "msg", "backfill triggered")
+	return redirect(gc, dest)
 }
 
 // ── crawlers (status) view ──────────────────────────────────────────
@@ -231,6 +289,25 @@ func (p *Plugin) jobVMs() (jobs []crawlerJobVM, anyRunning bool) {
 		jobs = append(jobs, j)
 	}
 	return jobs, anyRunning
+}
+
+// ── jobs widget (override for the "Usenet" job group) ───────────────
+
+func (p *Plugin) renderJobsWidget(ctx context.Context) (template.HTML, error) {
+	stats, err := p.st.stats(ctx)
+	if err != nil {
+		return "", err
+	}
+	jobs, _ := p.jobVMs()
+	var crawlJobs []crawlerJobVM
+	for _, j := range jobs {
+		if strings.HasPrefix(j.Name, "Usenet") {
+			crawlJobs = append(crawlJobs, j)
+		}
+	}
+	return p.frag("jobswidget.html", map[string]any{
+		"Jobs": crawlJobs, "Stats": stats,
+	})
 }
 
 func fmtDate(t time.Time) string {
