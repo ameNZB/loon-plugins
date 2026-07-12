@@ -13,6 +13,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"html/template"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ type Plugin struct {
 	ctx  context.Context
 	st   *store
 	svc  *service
+	tmpl *template.Template // admin-view fragments (views.go)
 
 	crawlJob    core.Job
 	backfillJob core.Job
@@ -68,12 +70,17 @@ func (p *Plugin) Provision(c *core.Core) error {
 	p.cfg.applyDefaults()
 	p.svc = &service{store: p.st}
 
-	// web/all: publish the read + admin capabilities the host pages consume.
+	// web/all: publish the read + admin capabilities the host pages consume,
+	// and register the plugin-owned admin views (setup wizard + crawl status)
+	// the host wraps in its own chrome.
 	if c.Process == "web" || c.Process == "all" {
 		if err := c.Register(pluginapi.UsenetIndexName, p.svc); err != nil {
 			return err
 		}
 		if err := c.Register(pluginapi.UsenetAdminName, p.svc); err != nil {
+			return err
+		}
+		if err := p.registerViews(c); err != nil {
 			return err
 		}
 	}
