@@ -22,6 +22,11 @@ func (p *Plugin) runBuild(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
+	if !p.buildMu.TryLock() {
+		p.buildJob.Log("build already running — skipping overlap")
+		return
+	}
+	defer p.buildMu.Unlock()
 	p.buildJob.SetRunning()
 
 	keys, err := p.st.candidateGroups(ctx, 500)

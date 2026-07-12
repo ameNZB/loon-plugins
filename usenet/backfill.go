@@ -17,6 +17,11 @@ func (p *Plugin) runBackfill(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
+	if !p.backfillMu.TryLock() {
+		p.backfillJob.Log("backfill already running — skipping overlap")
+		return
+	}
+	defer p.backfillMu.Unlock()
 	p.backfillJob.SetRunning()
 
 	if p.cfg.SkipBackfill {

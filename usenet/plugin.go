@@ -13,6 +13,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/ameNZB/loon/core"
@@ -39,6 +40,13 @@ type Plugin struct {
 	buildJob    core.Job
 	tagJob      core.Job
 	pruneJob    core.Job
+
+	// per-job locks: a manual trigger (admin button / /admin/jobs) must not
+	// overlap a scheduled run of the same job — they share one NNTP connection
+	// and race on watermarks.
+	crawlMu    sync.Mutex
+	backfillMu sync.Mutex
+	buildMu    sync.Mutex
 }
 
 func (p *Plugin) Metadata() core.Metadata {

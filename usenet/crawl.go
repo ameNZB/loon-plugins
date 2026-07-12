@@ -35,6 +35,11 @@ func (p *Plugin) runCrawl(ctx context.Context) {
 	if ctx == nil {
 		return
 	}
+	if !p.crawlMu.TryLock() {
+		p.crawlJob.Log("crawl already running — skipping overlap")
+		return
+	}
+	defer p.crawlMu.Unlock()
 	p.crawlJob.SetRunning()
 
 	srv, ok, err := p.st.getServer(ctx)
