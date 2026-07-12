@@ -1,113 +1,61 @@
-# loon-plugins
+<p align="center">
+  <img src="img/logo.png" alt="loon" width="180">
+</p>
 
-A collection of [loon](https://github.com/ameNZB/loon) plugins that package the
-ameNZB site's background jobs — scrapers, importers, and maintenance tasks — as
-self-describing modules instead of a 3,000-line `cmd/main.go` and a 50-service
-`pkg/services` directory.
+<h1 align="center">loon-plugins</h1>
 
-> **Status: scaffold.** Everything here compiles and vets against loon. Two
-> pieces:
-> - **`scraper/`** — the generic metadata scraper (the chosen direction): one
->   plugin that runs shared jobs over a registry of pluggable
->   `catalog.MetadataSource` modules. The PoC implements the Metadata-Fill job
->   over the existing `catalog.Registry`; sources (`scraper/sources/anidb`, …)
->   land next.
-> - **`anidbscraper/`** — an earlier mechanics demo (AniDB as a standalone
->   worker plugin with injected ports + `// EXTRACT:` stubs). Superseded as
->   *packaging* by the scraper module model, but still a valid reference for the
->   host-data worker + `SetDeps` pattern.
->
-> The architecture (two axes, the source-module model, the unified
-> `catalog_entry` table, the full plugin taxonomy) is in
-> [`../Indexer/SCRAPER-ARCHITECTURE.md`](../Indexer/SCRAPER-ARCHITECTURE.md); the
-> underlying job inventory + dependency analysis is in
-> [`../Indexer/JOBS-AS-PLUGINS.md`](../Indexer/JOBS-AS-PLUGINS.md).
+<p align="center">A collection of plugins for the <a href="https://github.com/ameNZB/loon">loon</a> framework.</p>
 
-## Why a separate repo
+---
 
-The job machinery (`RegisterJob`, `RunLoop`, off-peak gating, the admin
-`/admin/jobs` view) already lives in loon's `schedule` package, so a plugin
-inherits the whole scheduler for free. What stays coupled to the host is each
-job's **data surface** — the repositories it reads and writes. Packaging a job
-as a plugin makes that surface explicit (a small injected interface) instead of
-implicit (a field on `*composite.Storage`).
+Each plugin is a self-describing module a loon host imports and boots. The job
+machinery (`RegisterJob`, `RunLoop`, off-peak gating, the `/admin/jobs` view)
+lives in loon's `schedule` package, so a plugin inherits the scheduler for free —
+what a plugin declares is its **data surface**: its own Postgres schema, or a set
+of narrow ports the host injects.
 
-Pulling the jobs into their own module keeps the site binary's plugin list
-declarative — add an import, get a job; remove it, lose the job — and lets the
-genuinely generic ones (DB maintenance, sitemap, backup) be shared with any
-loon site.
+## Plugins
+
+| Plugin | What it is |
+|---|---|
+| **`usenet`** | A lean Usenet indexer — crawl recent posts → assemble multi-file NZBs → tag quality → prune. Owns its `usenet` schema; NNTP via `loon/nntp`; publishes read + admin capabilities the host's pages consume. |
+| **`scraper`** | Generic metadata scraper — shared jobs over a registry of pluggable `catalog.MetadataSource` modules (anidb, tmdb, mangadex, …). |
+| **`backups`** | Site backup — dumps the DB and runs every plugin's `Backupable` hook into one archive. |
+| **`stats`** | Collects every plugin's `StatContributor` hook into a cached site-stats snapshot. |
+| **`anidbscraper`** | Mechanics demo — AniDB as a standalone host-data worker plugin (injected ports + `SetDeps`). |
+| **`pluginapi`** | Neutral capability contracts both sides import (never each other): `UsenetIndex`/`UsenetAdmin`, `CatalogSink`/`Fillable`, `Backupable`/`StatContributor`, host-data ports. |
 
 ## Plugin archetypes
 
-Not every job is the same shape. Three kinds live here (or will):
-
 | Archetype | Owns a schema? | Data access | Example |
 |---|---|---|---|
-| **Self-contained** | Yes (`Metadata.Migrations`) | `core.Storage.SchemaDB` | (none yet — see `store` in indexer-site) |
+| **Self-contained** | Yes (`Metadata.Migrations`) | `core.Storage.SchemaDB` | **`usenet`** |
 | **Host-data worker** | No | narrow ports injected via `SetDeps` | **`anidbscraper`** |
-| **Generic/reusable** | Sometimes | mostly `core.Storage.DB()` + config | DB maintenance (planned) |
+| **Capability hook** | No | reads peers off the extension registry | **`backups`, `stats`** |
 
-Most of the site's jobs are **host-data workers**: they operate on tables the
-host owns (`nzbs`, `anime_metadata`, `articles`) that other subsystems also
-read and write, so the plugin cannot own the schema. `anidbscraper` is the
-template for that archetype.
+## How a host consumes a plugin
 
-## Layout
-
-```
-loon-plugins/
-├── go.mod                 module github.com/ameNZB/loon-plugins (replace loon => ../loon)
-├── pluginapi/             neutral contracts injected by / consumed from the host
-│   ├── scraper.go         CatalogSink (write seam) + Fillable (optional source capability)
-│   └── anidb.go           AnimeCatalog, NzbTagSink, TitleMatcher, CoverStore (anidbscraper demo)
-├── scraper/               THE generic metadata scraper (chosen direction)
-│   ├── plugin.go          owns catalog.Registry (via Lookup); generic Metadata-Fill job
-│   ├── deps.go            SetDeps(CatalogSink)
-│   └── sources/           source modules land here — each a catalog.MetadataSource
-│       └── (anidb, tmdb, mangadex, … — relocated from pkg/services/catalog_sources.go)
-└── anidbscraper/          earlier mechanics demo (AniDB as a standalone worker plugin)
-    ├── plugin.go          lifecycle + 3 jobs + injected ports
-    └── deps.go            Deps + SetDeps
-```
-
-## How the site consumes it
-
-1. In `indexer-site/go.mod`:
+1. In the host's `go.mod` (sibling-checkout `replace` until loon tags releases):
 
    ```
    require github.com/ameNZB/loon-plugins v0.0.0-...
-   replace github.com/ameNZB/loon-plugins => ../../loon-plugins
+   replace github.com/ameNZB/loon-plugins => ../loon-plugins
    ```
 
-2. In `indexer-site/cmd/main.go`, import the plugin (its `init()` self-registers)
-   and inject its host deps in the worker block, before `core.Boot`:
+2. Import the plugin — its `init()` self-registers. Self-contained plugins need
+   only a blank import; host-data plugins also call `SetDeps(...)` before
+   `core.Boot`:
 
    ```go
-   import "github.com/ameNZB/loon-plugins/anidbscraper"
-
-   // ... in the worker/all block, before core.Boot:
-   anidbscraper.SetDeps(anidbscraper.Deps{
-       Catalog: animeCatalogAdapter{stores.Anime},
-       Nzbs:    nzbTagSinkAdapter{stores.Nzb},
-       Matcher: anidbService.Matcher(),
-       Covers:  coverStoreAdapter{staticDir},
-   })
+   import _ "github.com/ameNZB/loon-plugins/usenet"   // self-contained
    ```
 
-3. Docker: because the `replace` points outside the build context, the Dockerfile
-   pulls the sibling checkout in via a BuildKit named build-context — mirroring
-   the existing loon wiring exactly:
+3. Docker: a `replace` pointing outside the build context needs a BuildKit
+   build-context (`--build-context loonplugins=../loon-plugins` +
+   `COPY --from=loonplugins`) — the same three-way contract loon uses.
 
-   ```
-   # push_docker.sh
-   docker build --build-context loon=../../loon --build-context loonplugins=../../loon-plugins ...
-   # Dockerfile (before `RUN go mod download`)
-   COPY --from=loonplugins . /loon-plugins/
-   ```
-
-   The relative path in `replace`, the `--build-context` name, and the
-   `COPY --from=` destination must all agree — same three-way contract loon
-   already uses.
+See [loon-demo-site](https://github.com/ameNZB/loon-demo-site) for a working host
+that wires `usenet`, `scraper`, `backups`, and `stats`.
 
 ## Development
 
