@@ -52,9 +52,12 @@ type UsenetIndex interface {
 type UsenetAdmin interface {
 	Server(ctx context.Context) (Server, error)
 	SetServer(ctx context.Context, s Server) error
-	TestConnect(ctx context.Context, s Server) error               // Dial + Auth + Quit
-	FetchGroups(ctx context.Context) (added int, err error)        // NNTP LIST -> insert inactive
-	AllGroups(ctx context.Context, limit int) ([]GroupInfo, error) // active-first, for the picker
+	TestConnect(ctx context.Context, s Server) error        // Dial + Auth + Quit
+	FetchGroups(ctx context.Context) (added int, err error) // NNTP LIST -> insert inactive
+	// AllGroups returns groups for the picker, active first. query filters by
+	// name substring (case-insensitive); empty query returns the first `limit`.
+	AllGroups(ctx context.Context, query string, limit int) ([]GroupInfo, error)
+	GroupCount(ctx context.Context) (int, error) // total groups fetched (for "showing N of M")
 	SetGroupActive(ctx context.Context, name string, active bool) error
 	TriggerCrawl() // fire the crawler job now
 }

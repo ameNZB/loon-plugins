@@ -148,10 +148,11 @@ func (s *store) upsertGroups(ctx context.Context, names []string) (int, error) {
 }
 
 // allGroups returns up to limit groups, active first then alphabetical, for the
-// admin picker. Capped so a 100k-group LIST can't render the whole tree.
-func (s *store) allGroups(ctx context.Context, limit int) ([]pluginapi.GroupInfo, error) {
+// admin picker. query filters by name substring so a 100k-group server is
+// searchable instead of truncated to the first page.
+func (s *store) allGroups(ctx context.Context, query string, limit int) ([]pluginapi.GroupInfo, error) {
 	if limit <= 0 || limit > 5000 {
-		limit = 1000
+		limit = 500
 	}
 	type row struct {
 		Name   string `db:"name"`
@@ -163,8 +164,9 @@ func (s *store) allGroups(ctx context.Context, limit int) ([]pluginapi.GroupInfo
 		return tx.SelectContext(ctx, &rows,
 			`SELECT g.name, g.active, COUNT(n.id) AS nzbs
 			 FROM newsgroups g LEFT JOIN nzbs n ON n.group_name = g.name
+			 WHERE ($1 = '' OR g.name ILIKE '%' || $1 || '%')
 			 GROUP BY g.name, g.active
-			 ORDER BY g.active DESC, g.name LIMIT $1`, limit)
+			 ORDER BY g.active DESC, g.name LIMIT $2`, query, limit)
 	})
 	if err != nil {
 		return nil, err
@@ -174,6 +176,16 @@ func (s *store) allGroups(ctx context.Context, limit int) ([]pluginapi.GroupInfo
 		out[i] = pluginapi.GroupInfo{Name: r.Name, Active: r.Active, NZBs: r.NZBs}
 	}
 	return out, nil
+}
+
+// groupCount returns the total number of fetched groups (so the picker can show
+// "showing N of M" and reassure that a big LIST was fully imported).
+func (s *store) groupCount(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM newsgroups`).Scan(&n)
+	})
+	return n, err
 }
 
 func (s *store) setGroupActive(ctx context.Context, name string, active bool) error {

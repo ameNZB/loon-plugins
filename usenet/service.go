@@ -70,8 +70,12 @@ func (s *service) FetchGroups(ctx context.Context) (int, error) {
 	return s.store.upsertGroups(ctx, names)
 }
 
-func (s *service) AllGroups(ctx context.Context, limit int) ([]pluginapi.GroupInfo, error) {
-	return s.store.allGroups(ctx, limit)
+func (s *service) AllGroups(ctx context.Context, query string, limit int) ([]pluginapi.GroupInfo, error) {
+	return s.store.allGroups(ctx, query, limit)
+}
+
+func (s *service) GroupCount(ctx context.Context) (int, error) {
+	return s.store.groupCount(ctx)
 }
 
 func (s *service) SetGroupActive(ctx context.Context, name string, active bool) error {
