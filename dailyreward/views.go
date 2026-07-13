@@ -102,6 +102,14 @@ func (p *Plugin) claim(c *gin.Context) {
 			fmt.Sprintf("Daily login reward (streak %d)", streak), 0); err != nil {
 			p.core.LoggerFor("dailyreward").Error("award", "err", err)
 		}
+		// Tell the user via the notification pipeline (fans out to the inbox bell,
+		// the logger, and any other channel the host registered). System event,
+		// so no actor.
+		_ = p.core.Notifications.Notify(c.Request.Context(), u.ID, core.Notification{
+			Kind:  "daily_reward",
+			Title: "Daily reward claimed",
+			Body:  fmt.Sprintf("You earned %d points (streak %d).", reward, streak),
+		})
 	}
 	c.Redirect(http.StatusSeeOther, "/")
 }
