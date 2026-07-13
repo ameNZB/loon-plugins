@@ -281,7 +281,7 @@ type groupKey struct {
 // distinct parts reach total_parts, multi-file when all file numbers are
 // present. runBuild re-verifies each with isComplete (which checks per-file
 // segment counts the SQL can't cheaply express).
-func (s *store) candidateGroups(ctx context.Context, limit int) ([]groupKey, error) {
+func (s *PGStore) candidateGroups(ctx context.Context, limit int) ([]groupKey, error) {
 	type row struct {
 		Group string `db:"group_name"`
 		Base  string `db:"base_subject"`
@@ -305,7 +305,7 @@ func (s *store) candidateGroups(ctx context.Context, limit int) ([]groupKey, err
 	return out, nil
 }
 
-func (s *store) groupArticles(ctx context.Context, group, base string) ([]stagedArticle, error) {
+func (s *PGStore) groupArticles(ctx context.Context, group, base string) ([]stagedArticle, error) {
 	type row struct {
 		MessageID  string       `db:"message_id"`
 		Subject    string       `db:"subject"`
@@ -358,7 +358,7 @@ type nzbRow struct {
 	CategoryID  int
 }
 
-func (s *store) insertNzb(ctx context.Context, n nzbRow) (bool, error) {
+func (s *PGStore) insertNzb(ctx context.Context, n nzbRow) (bool, error) {
 	inserted := false
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var posted sql.NullTime
@@ -382,7 +382,7 @@ func (s *store) insertNzb(ctx context.Context, n nzbRow) (bool, error) {
 	return inserted, err
 }
 
-func (s *store) deleteStaged(ctx context.Context, group, base string) error {
+func (s *PGStore) deleteStaged(ctx context.Context, group, base string) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`DELETE FROM articles WHERE group_name = $1 AND base_subject = $2`, group, base)

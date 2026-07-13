@@ -43,7 +43,7 @@ type categoryVM struct {
 }
 
 func (p *Plugin) renderSettings(ctx context.Context, msg string) (template.HTML, error) {
-	disabled, err := p.st.disabledSet(ctx)
+	disabled, err := p.st.DisabledSet(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -68,7 +68,7 @@ func (p *Plugin) renderSettings(ctx context.Context, msg string) (template.HTML,
 func (p *Plugin) actionToggle(gc *gin.Context) (template.HTML, error) {
 	id, _ := strconv.Atoi(gc.PostForm("id"))
 	if id > 0 {
-		if err := p.st.setEnabled(gc.Request.Context(), id, gc.PostForm("enabled") == "true"); err != nil {
+		if err := p.st.SetEnabled(gc.Request.Context(), id, gc.PostForm("enabled") == "true"); err != nil {
 			return "", err
 		}
 	}

@@ -11,10 +11,27 @@ import (
 	"github.com/ameNZB/loon/core"
 )
 
-type store struct{ db *core.SchemaDB }
+// Store is catalog's persistence contract (entry upserts, release covers, and
+// the admin category on/off set). The plugin depends on this interface, not a
+// concrete DB, so the backend is swappable + mockable. PGStore is the Postgres
+// impl; the in-memory mock lives in store_test.go.
+type Store interface {
+	UpsertEntry(ctx context.Context, e catalog.CatalogEntry) error
+	SetReleaseCover(ctx context.Context, releaseID int64, coverURL string) error
+	ReleaseCover(ctx context.Context, releaseID int64) (string, bool, error)
+	DisabledSet(ctx context.Context) (map[int]bool, error)
+	SetEnabled(ctx context.Context, categoryID int, enabled bool) error
+}
 
-// upsertEntry persists a scraped catalog entry, deduped on (kind, external id).
-func (s *store) upsertEntry(ctx context.Context, e catalog.CatalogEntry) error {
+// PGStore is the Postgres implementation of Store (schema-scoped via SchemaDB).
+type PGStore struct{ db *core.SchemaDB }
+
+func NewPGStore(db *core.SchemaDB) *PGStore { return &PGStore{db: db} }
+
+var _ Store = (*PGStore)(nil)
+
+// UpsertEntry persists a scraped catalog entry, deduped on (kind, external id).
+func (s *PGStore) UpsertEntry(ctx context.Context, e catalog.CatalogEntry) error {
 	ns, extID := "", ""
 	if len(e.External) > 0 {
 		ns, extID = e.External[0].Namespace, e.External[0].Value
@@ -33,7 +50,7 @@ func (s *store) upsertEntry(ctx context.Context, e catalog.CatalogEntry) error {
 	})
 }
 
-func (s *store) setReleaseCover(ctx context.Context, releaseID int64, coverURL string) error {
+func (s *PGStore) SetReleaseCover(ctx context.Context, releaseID int64, coverURL string) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO release_cover (release_id, cover_url, updated_at) VALUES ($1, $2, now())
@@ -43,7 +60,7 @@ func (s *store) setReleaseCover(ctx context.Context, releaseID int64, coverURL s
 	})
 }
 
-func (s *store) releaseCover(ctx context.Context, releaseID int64) (string, bool, error) {
+func (s *PGStore) ReleaseCover(ctx context.Context, releaseID int64) (string, bool, error) {
 	var url string
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		e := tx.QueryRowContext(ctx, `SELECT cover_url FROM release_cover WHERE release_id = $1`, releaseID).Scan(&url)
@@ -55,8 +72,8 @@ func (s *store) releaseCover(ctx context.Context, releaseID int64) (string, bool
 	return url, url != "", err
 }
 
-// disabledSet returns the top-level category ids an admin has turned off.
-func (s *store) disabledSet(ctx context.Context) (map[int]bool, error) {
+// DisabledSet returns the top-level category ids an admin has turned off.
+func (s *PGStore) DisabledSet(ctx context.Context) (map[int]bool, error) {
 	out := map[int]bool{}
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var ids []int
@@ -71,9 +88,9 @@ func (s *store) disabledSet(ctx context.Context) (map[int]bool, error) {
 	return out, err
 }
 
-// setEnabled turns a top-level category on (delete the disabled row) or off
+// SetEnabled turns a top-level category on (delete the disabled row) or off
 // (insert one).
-func (s *store) setEnabled(ctx context.Context, categoryID int, enabled bool) error {
+func (s *PGStore) SetEnabled(ctx context.Context, categoryID int, enabled bool) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		if enabled {
 			_, err := tx.ExecContext(ctx, `DELETE FROM category_disabled WHERE category_id = $1`, categoryID)

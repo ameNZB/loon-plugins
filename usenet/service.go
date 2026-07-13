@@ -14,7 +14,7 @@ var errNoServer = errors.New("usenet: no server configured")
 // store + NNTP helpers. One instance is published on the core extension registry
 // under both names in the web/all process.
 type service struct {
-	store           *store
+	store           Store
 	retentionDays   int               // for the Newznab caps <retention> element
 	catalog         pluginapi.Catalog // optional — enabled categories + name resolution
 	triggerCrawl    func()            // set by the plugin in the worker/all process
@@ -42,7 +42,7 @@ var (
 // live on service because UsenetAdmin already claims the Stats method name
 // with a different signature. The indexer's totals feed the stats plugin's
 // snapshot (and through it the host's site-stats page).
-type statHook struct{ store *store }
+type statHook struct{ store Store }
 
 func (h statHook) StatsName() string { return "usenet" }
 

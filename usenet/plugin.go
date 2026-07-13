@@ -34,7 +34,7 @@ type Plugin struct {
 	core    *core.Core
 	cfg     Config
 	ctx     context.Context
-	st      *store
+	st      Store
 	svc     *service
 	tmpl    *template.Template // admin-view fragments (views.go)
 	catalog pluginapi.Catalog  // optional — the content-taxonomy plugin (looked up in Start)
@@ -65,7 +65,7 @@ func (p *Plugin) Metadata() core.Metadata {
 
 func (p *Plugin) Provision(c *core.Core) error {
 	p.core = c
-	p.st = &store{db: c.Storage.SchemaDB("usenet")}
+	p.st = NewPGStore(c.Storage.SchemaDB("usenet"))
 	if err := c.Config.PluginInto("usenet", &p.cfg); err != nil {
 		return fmt.Errorf("usenet: config: %w", err)
 	}

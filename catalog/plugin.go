@@ -31,7 +31,7 @@ func init() {
 
 type Plugin struct {
 	core *core.Core
-	st   *store
+	st   Store
 	svc  *service
 	tmpl *template.Template
 }
@@ -48,7 +48,7 @@ func (p *Plugin) Metadata() core.Metadata {
 
 func (p *Plugin) Provision(c *core.Core) error {
 	p.core = c
-	p.st = &store{db: c.Storage.SchemaDB("catalog")}
+	p.st = NewPGStore(c.Storage.SchemaDB("catalog"))
 	p.svc = &service{store: p.st}
 
 	// Publish the taxonomy capability in every process (the worker categorizes

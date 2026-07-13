@@ -41,7 +41,7 @@ type captchaCap interface {
 
 type Plugin struct {
 	core    *core.Core
-	st      *store
+	st      Store
 	captcha captchaCap // nil when the host registered none — claim runs ungated
 	tmpl    *template.Template
 }
@@ -58,7 +58,7 @@ func (p *Plugin) Metadata() core.Metadata {
 
 func (p *Plugin) Provision(c *core.Core) error {
 	p.core = c
-	p.st = &store{db: c.Storage.SchemaDB("dailyreward")}
+	p.st = NewPGStore(c.Storage.SchemaDB("dailyreward"))
 
 	if v, ok := c.Lookup(captchaExtension); ok {
 		p.captcha, _ = v.(captchaCap)

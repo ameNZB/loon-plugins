@@ -9,24 +9,38 @@ import (
 	"github.com/ameNZB/loon/core"
 )
 
-type store struct{ db *core.SchemaDB }
+// Store is dailyreward's persistence contract. The plugin logic depends on this
+// interface, never a concrete database, so the backend is swappable and the
+// logic is testable against a double (PGStore is the Postgres impl; the
+// in-memory mock lives in store_test.go).
+type Store interface {
+	Get(ctx context.Context, userID int64) (State, error)
+	Claim(ctx context.Context, userID int64, today, yesterday string) (streak, reward int, claimed bool, err error)
+}
 
-// state is a user's current reward standing. LastClaim is a civil date string
+// State is a user's current reward standing. LastClaim is a civil date string
 // ("YYYY-MM-DD") or "" if never claimed — kept as a string so streak arithmetic
 // never depends on the process/DB timezone.
-type state struct {
+type State struct {
 	LastClaim   string
 	Streak      int
 	Longest     int
 	TotalClaims int
 }
 
-// Every query goes through SchemaDB.WithTx, which sets search_path to the
-// plugin's schema so unqualified table names resolve there (the raw .DB() pool
-// runs under the default search_path and would not find daily_rewards).
+// PGStore is the Postgres implementation of Store. Every query goes through
+// SchemaDB.WithTx, which sets search_path to the plugin's schema so unqualified
+// table names resolve there (the raw .DB() pool runs under the default
+// search_path and would not find daily_rewards).
+type PGStore struct{ db *core.SchemaDB }
 
-func (s *store) get(ctx context.Context, userID int64) (state, error) {
-	var st state
+// NewPGStore builds the Postgres-backed store over a plugin-scoped SchemaDB.
+func NewPGStore(db *core.SchemaDB) *PGStore { return &PGStore{db: db} }
+
+var _ Store = (*PGStore)(nil)
+
+func (s *PGStore) Get(ctx context.Context, userID int64) (State, error) {
+	var st State
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var lc sql.NullString
 		e := tx.QueryRowContext(ctx,
@@ -42,14 +56,13 @@ func (s *store) get(ctx context.Context, userID int64) (state, error) {
 	return st, err
 }
 
-// claim records today's claim if not already done, atomically (read + write in
-// one scoped tx). today/yesterday are civil date strings. Returns the new
-// streak, the reward granted, and claimed=false (unchanged streak) if the user
-// already claimed today.
-func (s *store) claim(ctx context.Context, userID int64, today, yesterday string) (streak, reward int, claimed bool, err error) {
+// Claim records today's claim if not already done, atomically (read + write in
+// one scoped tx). Returns the new streak, the reward granted, and claimed=false
+// (unchanged streak) if the user already claimed today.
+func (s *PGStore) Claim(ctx context.Context, userID int64, today, yesterday string) (streak, reward int, claimed bool, err error) {
 	err = s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var lc sql.NullString
-		var cur state
+		var cur State
 		e := tx.QueryRowContext(ctx,
 			`SELECT to_char(last_claim,'YYYY-MM-DD'), streak, longest, total_claims
 			   FROM daily_rewards WHERE user_id = $1 FOR UPDATE`, userID).

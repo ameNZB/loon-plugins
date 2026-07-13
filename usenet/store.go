@@ -17,20 +17,27 @@ import (
 // store is the usenet-schema data layer. Every method runs through the
 // SchemaDB's WithTx, which scopes search_path to "usenet" so unqualified table
 // names resolve into the plugin's own schema.
-type store struct{ db *core.SchemaDB }
+// PGStore is the Postgres implementation of Store (schema-scoped via SchemaDB;
+// every method runs through WithTx so search_path resolves the usenet schema).
+type PGStore struct{ db *core.SchemaDB }
 
-func (s *store) searchNzbs(ctx context.Context, q string, limit int) ([]pluginapi.Release, error) {
+// NewPGStore builds the Postgres-backed store over a plugin-scoped SchemaDB.
+func NewPGStore(db *core.SchemaDB) *PGStore { return &PGStore{db: db} }
+
+var _ Store = (*PGStore)(nil)
+
+func (s *PGStore) searchNzbs(ctx context.Context, q string, limit int) ([]pluginapi.Release, error) {
 	return s.queryReleases(ctx, `title ILIKE '%' || $1 || '%'`, q, limit)
 }
 
-func (s *store) browseNzbs(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
+func (s *PGStore) browseNzbs(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
 	return s.queryReleases(ctx, `($1 = '' OR group_name = $1)`, group, limit)
 }
 
 // queryReleases lists completed NZBs newest-first. cond is a fixed literal
 // referencing $1 (the search term or group name); arg flows through the
 // placeholder, so there is no injection despite the concatenation.
-func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) ([]pluginapi.Release, error) {
+func (s *PGStore) queryReleases(ctx context.Context, cond, arg string, limit int) ([]pluginapi.Release, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
@@ -76,7 +83,7 @@ func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) 
 // feedReleases pages completed releases for the Newznab feed: optional title
 // filter (empty = recent-all), newest first, with the matching total for the
 // newznab:response offset/total attrs. query flows through $1 (no injection).
-func (s *store) feedReleases(ctx context.Context, query string, cats []int, limit, offset int) ([]pluginapi.Release, int, error) {
+func (s *PGStore) feedReleases(ctx context.Context, query string, cats []int, limit, offset int) ([]pluginapi.Release, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
@@ -140,7 +147,7 @@ func (s *store) feedReleases(ctx context.Context, query string, cats []int, limi
 
 // stats returns crawl progress: total NZBs, total staged articles, and per
 // active-group status (NZBs, staged, last crawl, watermark vs server high).
-func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {
+func (s *PGStore) stats(ctx context.Context) (pluginapi.IndexStats, error) {
 	var st pluginapi.IndexStats
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		if err := tx.GetContext(ctx, &st.TotalNZBs, `SELECT COUNT(*) FROM nzbs`); err != nil {
@@ -197,7 +204,7 @@ func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {
 	return st, err
 }
 
-func (s *store) groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {
+func (s *PGStore) groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {
 	type row struct {
 		Name   string `db:"name"`
 		Active bool   `db:"active"`
@@ -238,7 +245,7 @@ type detailRow struct {
 }
 
 // releaseByID loads one completed release + its NZB blob; nil if absent.
-func (s *store) releaseByID(ctx context.Context, id int64) (*detailRow, error) {
+func (s *PGStore) releaseByID(ctx context.Context, id int64) (*detailRow, error) {
 	var r detailRow
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		return tx.GetContext(ctx, &r,
@@ -255,7 +262,7 @@ func (s *store) releaseByID(ctx context.Context, id int64) (*detailRow, error) {
 	return &r, nil
 }
 
-func (s *store) nzbData(ctx context.Context, id int64) ([]byte, string, error) {
+func (s *PGStore) nzbData(ctx context.Context, id int64) ([]byte, string, error) {
 	var data []byte
 	var filename string
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
@@ -268,7 +275,7 @@ func (s *store) nzbData(ctx context.Context, id int64) ([]byte, string, error) {
 	return data, filename, nil
 }
 
-func (s *store) getServer(ctx context.Context) (pluginapi.Server, bool, error) {
+func (s *PGStore) getServer(ctx context.Context) (pluginapi.Server, bool, error) {
 	var srv pluginapi.Server
 	found := false
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
@@ -287,7 +294,7 @@ func (s *store) getServer(ctx context.Context) (pluginapi.Server, bool, error) {
 	return srv, found, err
 }
 
-func (s *store) saveServer(ctx context.Context, srv pluginapi.Server) error {
+func (s *PGStore) saveServer(ctx context.Context, srv pluginapi.Server) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM servers`); err != nil {
 			return err
@@ -302,7 +309,7 @@ func (s *store) saveServer(ctx context.Context, srv pluginapi.Server) error {
 
 // upsertGroups inserts each name as an inactive group, ignoring duplicates.
 // Returns how many were newly added.
-func (s *store) upsertGroups(ctx context.Context, names []string) (int, error) {
+func (s *PGStore) upsertGroups(ctx context.Context, names []string) (int, error) {
 	added := 0
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		for _, name := range names {
@@ -323,7 +330,7 @@ func (s *store) upsertGroups(ctx context.Context, names []string) (int, error) {
 // allGroups returns up to limit groups, active first then alphabetical, for the
 // admin picker. query filters by name substring so a 100k-group server is
 // searchable instead of truncated to the first page.
-func (s *store) allGroups(ctx context.Context, query string, limit int) ([]pluginapi.GroupInfo, error) {
+func (s *PGStore) allGroups(ctx context.Context, query string, limit int) ([]pluginapi.GroupInfo, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 500
 	}
@@ -353,7 +360,7 @@ func (s *store) allGroups(ctx context.Context, query string, limit int) ([]plugi
 
 // groupCount returns the total number of fetched groups (so the picker can show
 // "showing N of M" and reassure that a big LIST was fully imported).
-func (s *store) groupCount(ctx context.Context) (int, error) {
+func (s *PGStore) groupCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM newsgroups`).Scan(&n)
@@ -361,7 +368,7 @@ func (s *store) groupCount(ctx context.Context) (int, error) {
 	return n, err
 }
 
-func (s *store) setGroupActive(ctx context.Context, name string, active bool) error {
+func (s *PGStore) setGroupActive(ctx context.Context, name string, active bool) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE newsgroups SET active = $2 WHERE name = $1`, name, active)
 		return err
@@ -402,7 +409,7 @@ func (p PendingRelease) Pct() int {
 	return v
 }
 
-func (s *store) builderInfo(ctx context.Context, limit int) (BuilderInfo, error) {
+func (s *PGStore) builderInfo(ctx context.Context, limit int) (BuilderInfo, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
@@ -452,7 +459,7 @@ func (s *store) builderInfo(ctx context.Context, limit int) (BuilderInfo, error)
 
 // ── plugin settings (admin-editable knob overrides) ─────────────────
 
-func (s *store) getSettings(ctx context.Context) (map[string]string, error) {
+func (s *PGStore) getSettings(ctx context.Context) (map[string]string, error) {
 	out := map[string]string{}
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var rows []struct {
@@ -470,7 +477,7 @@ func (s *store) getSettings(ctx context.Context) (map[string]string, error) {
 	return out, err
 }
 
-func (s *store) setSetting(ctx context.Context, key, value string) error {
+func (s *PGStore) setSetting(ctx context.Context, key, value string) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, now())
@@ -492,7 +499,7 @@ type backfillRow struct {
 
 // groupsNeedingBackfill lists active groups not yet marked done whose backfill
 // pointer is still above the server's oldest article.
-func (s *store) groupsNeedingBackfill(ctx context.Context, limit int) ([]backfillRow, error) {
+func (s *PGStore) groupsNeedingBackfill(ctx context.Context, limit int) ([]backfillRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -522,7 +529,7 @@ func (s *store) groupsNeedingBackfill(ctx context.Context, limit int) ([]backfil
 
 // updateBackWatermark lowers a group's backfill pointer and records the oldest
 // posting date reached (kept if the batch had no dated articles).
-func (s *store) updateBackWatermark(ctx context.Context, name string, back int64, oldest time.Time) error {
+func (s *PGStore) updateBackWatermark(ctx context.Context, name string, back int64, oldest time.Time) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var d sql.NullTime
 		if !oldest.IsZero() {
@@ -537,7 +544,7 @@ func (s *store) updateBackWatermark(ctx context.Context, name string, back int64
 	})
 }
 
-func (s *store) markBackfillDone(ctx context.Context, name string) error {
+func (s *PGStore) markBackfillDone(ctx context.Context, name string) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE newsgroups SET backfill_done = TRUE WHERE name = $1`, name)
 		return err
@@ -546,7 +553,7 @@ func (s *store) markBackfillDone(ctx context.Context, name string) error {
 
 // resetBackfill re-arms a group: backfill restarts just below the forward
 // watermark and walks down again (dupes are ignored on insert).
-func (s *store) resetBackfill(ctx context.Context, name string) error {
+func (s *PGStore) resetBackfill(ctx context.Context, name string) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		_, err := tx.ExecContext(ctx,
 			`UPDATE newsgroups
@@ -559,7 +566,7 @@ func (s *store) resetBackfill(ctx context.Context, name string) error {
 
 // retagUntagged re-parses tags for NZBs that have none set (rows from before a
 // parser change, or that genuinely had no tags in the title). Idempotent.
-func (s *store) retagUntagged(ctx context.Context, limit int) (int, error) {
+func (s *PGStore) retagUntagged(ctx context.Context, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 500
 	}
@@ -595,7 +602,7 @@ func (s *store) retagUntagged(ctx context.Context, limit int) (int, error) {
 // recategorizeDefaults reassigns the category of releases still at the default
 // (8010 Other/Misc) — rows built before categorization, or before a rule change.
 // fn is the catalog's Categorize; only changed rows are written.
-func (s *store) recategorizeDefaults(ctx context.Context, fn func(group, title string) int, limit int) (int, error) {
+func (s *PGStore) recategorizeDefaults(ctx context.Context, fn func(group, title string) int, limit int) (int, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -625,7 +632,7 @@ func (s *store) recategorizeDefaults(ctx context.Context, fn func(group, title s
 	return updated, err
 }
 
-func (s *store) pruneNzbs(ctx context.Context, days int) (int64, error) {
+func (s *PGStore) pruneNzbs(ctx context.Context, days int) (int64, error) {
 	var n int64
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		res, err := tx.ExecContext(ctx,
@@ -642,7 +649,7 @@ func (s *store) pruneNzbs(ctx context.Context, days int) (int64, error) {
 // deleteJunkNzbs removes already-built NZBs whose title is junk (rows from
 // before junk filtering, or that slipped through). Detection is Go-side, so we
 // scan titles then delete by id in chunks.
-func (s *store) deleteJunkNzbs(ctx context.Context) (int, error) {
+func (s *PGStore) deleteJunkNzbs(ctx context.Context) (int, error) {
 	removed := 0
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var rows []struct {
@@ -677,7 +684,7 @@ func (s *store) deleteJunkNzbs(ctx context.Context) (int, error) {
 // deleteJunkStaged removes staged articles whose base_subject is junk (the
 // backlog from before ingest filtering). Distinct bases are far fewer than
 // rows; deleted in chunks.
-func (s *store) deleteJunkStaged(ctx context.Context) (int64, error) {
+func (s *PGStore) deleteJunkStaged(ctx context.Context) (int64, error) {
 	var deleted int64
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var bases []string
@@ -708,7 +715,7 @@ func (s *store) deleteJunkStaged(ctx context.Context) (int64, error) {
 	return deleted, err
 }
 
-func (s *store) pruneStaging(ctx context.Context) (int64, error) {
+func (s *PGStore) pruneStaging(ctx context.Context) (int64, error) {
 	var n int64
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		res, err := tx.ExecContext(ctx, `DELETE FROM articles WHERE added_at < now() - INTERVAL '6 hours'`)

@@ -13,7 +13,7 @@ import (
 // scraper's write side) and pluginapi.CatalogCovers (release→cover). Published
 // on the extension registry; consumers type-assert the extra interfaces off the
 // Catalog capability.
-type service struct{ store *store }
+type service struct{ store Store }
 
 var (
 	_ pluginapi.Catalog       = (*service)(nil)
@@ -23,16 +23,16 @@ var (
 
 // Upsert (CatalogSink) persists a scraped entry.
 func (s *service) Upsert(ctx context.Context, e catalog.CatalogEntry) error {
-	return s.store.upsertEntry(ctx, e)
+	return s.store.UpsertEntry(ctx, e)
 }
 
 // SetReleaseCover / ReleaseCover (CatalogCovers) link a release to cover art.
 func (s *service) SetReleaseCover(ctx context.Context, releaseID int64, coverURL string) error {
-	return s.store.setReleaseCover(ctx, releaseID, coverURL)
+	return s.store.SetReleaseCover(ctx, releaseID, coverURL)
 }
 
 func (s *service) ReleaseCover(ctx context.Context, releaseID int64) (string, bool, error) {
-	return s.store.releaseCover(ctx, releaseID)
+	return s.store.ReleaseCover(ctx, releaseID)
 }
 
 func (s *service) All(_ context.Context) ([]pluginapi.Category, error) {
@@ -40,7 +40,7 @@ func (s *service) All(_ context.Context) ([]pluginapi.Category, error) {
 }
 
 func (s *service) Enabled(ctx context.Context) ([]pluginapi.Category, error) {
-	disabled, err := s.store.disabledSet(ctx)
+	disabled, err := s.store.DisabledSet(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func (s *service) Enabled(ctx context.Context) ([]pluginapi.Category, error) {
 }
 
 func (s *service) IsEnabled(ctx context.Context, categoryID int) (bool, error) {
-	disabled, err := s.store.disabledSet(ctx)
+	disabled, err := s.store.DisabledSet(ctx)
 	if err != nil {
 		return false, err
 	}

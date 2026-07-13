@@ -15,7 +15,7 @@ func today() string     { return time.Now().UTC().Format("2006-01-02") }
 func yesterday() string { return time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02") }
 
 // nextStreak is the streak a claim right now would produce (for the button label).
-func nextStreak(st state) int {
+func nextStreak(st State) int {
 	switch st.LastClaim {
 	case today():
 		return st.Streak // already claimed
@@ -38,7 +38,7 @@ func (p *Plugin) renderWidget(c *gin.Context) (template.HTML, error) {
 	if !ok {
 		return "", nil // MinRole gate should prevent this; render nothing
 	}
-	st, err := p.st.get(c.Request.Context(), u.ID)
+	st, err := p.st.Get(c.Request.Context(), u.ID)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +69,7 @@ func (p *Plugin) claim(c *gin.Context) {
 			return
 		}
 	}
-	streak, reward, claimed, err := p.st.claim(c.Request.Context(), u.ID, today(), yesterday())
+	streak, reward, claimed, err := p.st.Claim(c.Request.Context(), u.ID, today(), yesterday())
 	if err != nil {
 		p.core.LoggerFor("dailyreward").Error("claim", "err", err)
 		c.Redirect(http.StatusSeeOther, "/")

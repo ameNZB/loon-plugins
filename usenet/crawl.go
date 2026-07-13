@@ -188,7 +188,7 @@ type groupRow struct {
 	HighWatermark int64
 }
 
-func (s *store) activeGroups(ctx context.Context, limit int) ([]groupRow, error) {
+func (s *PGStore) activeGroups(ctx context.Context, limit int) ([]groupRow, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -211,7 +211,7 @@ func (s *store) activeGroups(ctx context.Context, limit int) ([]groupRow, error)
 	return out, nil
 }
 
-func (s *store) stageArticles(ctx context.Context, arts []stagedArticle) (int, error) {
+func (s *PGStore) stageArticles(ctx context.Context, arts []stagedArticle) (int, error) {
 	n := 0
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		for _, a := range arts {
@@ -239,7 +239,7 @@ func (s *store) stageArticles(ctx context.Context, arts []stagedArticle) (int, e
 	return n, err
 }
 
-func (s *store) updateGroupState(ctx context.Context, name string, low, high, start int64, hwDate time.Time) error {
+func (s *PGStore) updateGroupState(ctx context.Context, name string, low, high, start int64, hwDate time.Time) error {
 	return s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		var hw sql.NullTime
 		if !hwDate.IsZero() {
