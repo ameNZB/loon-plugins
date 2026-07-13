@@ -36,9 +36,12 @@
             </div>
             {{end}}
         </div>
-        <div style="margin-top:.75rem">
+        <label style="margin-top:.75rem;display:block">
+            <input type="checkbox" name="skip_backfill" {{if .SkipBackfill}}checked{{end}}> Skip backfill (new articles only — don't pull history)
+        </label>
+        <div style="margin-top:.5rem">
             <button class="btn btn-primary" type="submit">Save settings</button>
-            <span class="text-muted small">applied on each job's next run</span>
+            <span class="text-muted small">applied on each job's next run (intervals take effect next cycle)</span>
         </div>
     </form>
 </div>

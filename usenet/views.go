@@ -133,10 +133,12 @@ func (p *Plugin) knobs(ctx context.Context) []knob {
 	cfg := p.effective(ctx)
 	return []knob{
 		{"retention_days", "Retention (days)", cfg.RetentionDays, "keep the last N days of releases"},
+		{"crawl_interval_min", "Crawl interval (min)", cfg.CrawlIntervalMin, "how often to crawl + build (applies next cycle)"},
 		{"batch", "Overview batch size", cfg.Batch, "article-number span per NNTP OVER request"},
 		{"max_groups", "Max groups per run", cfg.MaxGroups, "cap active groups crawled per pass"},
 		{"max_articles_per_group", "First-pass article cap", cfg.MaxArticlesPerGroup, "cap a new group's initial volume"},
-		{"backfill_batches_per_run", "Backfill batches per run", cfg.BackfillBatchesPerRun, "bounds one backfill pass across all groups"},
+		{"backfill_interval_min", "Backfill interval (min)", cfg.BackfillIntervalMin, "how often to pull history (applies next cycle)"},
+		{"backfill_batches_per_run", "Backfill batches per run", cfg.BackfillBatchesPerRun, "how much history each backfill pass pulls"},
 	}
 }
 
@@ -144,7 +146,7 @@ func (p *Plugin) renderSettings(ctx context.Context, srv pluginapi.Server, gq, m
 	groups, _ := p.st.allGroups(ctx, gq, 300)
 	total, _ := p.st.groupCount(ctx)
 	return p.frag("settings.html", map[string]any{
-		"Server": srv, "Knobs": p.knobs(ctx),
+		"Server": srv, "Knobs": p.knobs(ctx), "SkipBackfill": p.effective(ctx).SkipBackfill,
 		"Groups": groups, "GroupQuery": gq,
 		"GroupTotal": total, "Shown": len(groups),
 		"Msg": msg, "Err": errMsg,
@@ -199,6 +201,15 @@ func (p *Plugin) actionSaveKnobs(gc *gin.Context) (template.HTML, error) {
 			return settingsRedirect(gc, "err", key+" must be a positive number")
 		}
 		if err := p.st.setSetting(ctx, key, raw); err != nil {
+			return settingsRedirect(gc, "err", err.Error())
+		}
+	}
+	for key := range cfg.boolFields() {
+		val := "false"
+		if v := gc.PostForm(key); v == "on" || v == "true" {
+			val = "true"
+		}
+		if err := p.st.setSetting(ctx, key, val); err != nil {
 			return settingsRedirect(gc, "err", err.Error())
 		}
 	}

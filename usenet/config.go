@@ -55,21 +55,30 @@ func (c *Config) applyDefaults() {
 	}
 }
 
-// knobFields maps admin-editable setting keys to the Config field each
+// knobFields maps admin-editable integer setting keys to the Config field each
 // overrides. One place to keep the settings form, the save action, and the
-// override resolution in sync.
+// override resolution in sync — no hardcoded operational values.
 func (c *Config) knobFields() map[string]*int {
 	return map[string]*int{
 		"retention_days":           &c.RetentionDays,
+		"crawl_interval_min":       &c.CrawlIntervalMin,
 		"batch":                    &c.Batch,
 		"max_groups":               &c.MaxGroups,
 		"max_articles_per_group":   &c.MaxArticlesPerGroup,
+		"backfill_interval_min":    &c.BackfillIntervalMin,
 		"backfill_batches_per_run": &c.BackfillBatchesPerRun,
 	}
 }
 
-// withOverrides overlays DB settings (positive integers only) onto the config
-// defaults. Invalid or missing values keep the default.
+// boolFields maps admin-editable boolean setting keys to their Config field.
+func (c *Config) boolFields() map[string]*bool {
+	return map[string]*bool{
+		"skip_backfill": &c.SkipBackfill,
+	}
+}
+
+// withOverrides overlays DB settings onto the config defaults: positive ints for
+// knobFields, true/false for boolFields. Invalid/missing values keep the default.
 func (c Config) withOverrides(s map[string]string) Config {
 	out := c
 	for key, dst := range out.knobFields() {
@@ -77,6 +86,11 @@ func (c Config) withOverrides(s map[string]string) Config {
 			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
 				*dst = n
 			}
+		}
+	}
+	for key, dst := range out.boolFields() {
+		if raw, ok := s[key]; ok {
+			*dst = raw == "true" || raw == "1" || raw == "on"
 		}
 	}
 	return out

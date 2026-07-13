@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ameNZB/loon/core"
+	"github.com/ameNZB/loon/schedule"
 
 	"github.com/ameNZB/loon-plugins/pluginapi"
 )
@@ -130,6 +131,24 @@ func (p *Plugin) Start(ctx context.Context) error {
 			p.svc.catalog = cat
 		}
 	}
+	// Make the crawl/backfill intervals live-editable: the scheduler consults
+	// this hook before every inter-tick sleep, so a settings change applies on
+	// the next cycle without a restart. Chain the previous hook so other
+	// plugins' / the host's jobs are unaffected.
+	prevInterval := schedule.IntervalOverride
+	schedule.IntervalOverride = func(ctx context.Context, jobName string, def time.Duration) time.Duration {
+		switch jobName {
+		case "Usenet Crawler", "NZB Builder":
+			return time.Duration(p.effective(ctx).CrawlIntervalMin) * time.Minute
+		case "Usenet Backfill":
+			return time.Duration(p.effective(ctx).BackfillIntervalMin) * time.Minute
+		}
+		if prevInterval != nil {
+			return prevInterval(ctx, jobName, def)
+		}
+		return def
+	}
+
 	if p.crawlJob == nil {
 		return nil // web-only process: capability is registered, no jobs run here
 	}
