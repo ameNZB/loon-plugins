@@ -44,6 +44,7 @@ type Plugin struct {
 	ctx      context.Context // root ctx captured in Start; read by admin triggers
 	registry *catalog.Registry
 	fillJob  core.Job
+	matchJob core.Job
 }
 
 func (p *Plugin) Metadata() core.Metadata {
@@ -84,6 +85,12 @@ func (p *Plugin) Provision(c *core.Core) error {
 		"Enriches catalog entries missing metadata across every registered source").
 		MarkOffPeak()
 	p.fillJob.SetTrigger(func() { go p.runFill(p.ctx) })
+
+	p.matchJob = c.Scheduler.RegisterJob(
+		"Catalog Match",
+		"Matches releases to catalog sources by title + category and links cover art").
+		MarkOffPeak()
+	p.matchJob.SetTrigger(func() { go p.runMatch(p.ctx) })
 	return nil
 }
 
@@ -94,6 +101,7 @@ func (p *Plugin) Start(ctx context.Context) error {
 		interval = time.Hour
 	}
 	p.core.Scheduler.RunLoop(ctx, p.fillJob, 2*time.Minute, interval, p.runFill)
+	p.core.Scheduler.RunLoop(ctx, p.matchJob, 3*time.Minute, interval, p.runMatch)
 	return nil
 }
 

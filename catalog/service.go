@@ -3,15 +3,37 @@ package catalog
 import (
 	"context"
 
+	"github.com/ameNZB/loon/catalog"
+
 	"github.com/ameNZB/loon-plugins/pluginapi"
 )
 
-// service implements pluginapi.Catalog over the static taxonomy + the disabled
-// set. Published on the extension registry so indexer plugins (usenet) can read
-// the enabled categories for Newznab caps and categorize releases.
+// service implements pluginapi.Catalog (taxonomy) over the static tree + the
+// disabled set, AND the metadata-store seams — pluginapi.CatalogSink (the
+// scraper's write side) and pluginapi.CatalogCovers (release→cover). Published
+// on the extension registry; consumers type-assert the extra interfaces off the
+// Catalog capability.
 type service struct{ store *store }
 
-var _ pluginapi.Catalog = (*service)(nil)
+var (
+	_ pluginapi.Catalog       = (*service)(nil)
+	_ pluginapi.CatalogSink   = (*service)(nil)
+	_ pluginapi.CatalogCovers = (*service)(nil)
+)
+
+// Upsert (CatalogSink) persists a scraped entry.
+func (s *service) Upsert(ctx context.Context, e catalog.CatalogEntry) error {
+	return s.store.upsertEntry(ctx, e)
+}
+
+// SetReleaseCover / ReleaseCover (CatalogCovers) link a release to cover art.
+func (s *service) SetReleaseCover(ctx context.Context, releaseID int64, coverURL string) error {
+	return s.store.setReleaseCover(ctx, releaseID, coverURL)
+}
+
+func (s *service) ReleaseCover(ctx context.Context, releaseID int64) (string, bool, error) {
+	return s.store.releaseCover(ctx, releaseID)
+}
 
 func (s *service) All(_ context.Context) ([]pluginapi.Category, error) {
 	return taxonomy, nil

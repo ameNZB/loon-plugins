@@ -37,4 +37,13 @@ type Catalog interface {
 	Name(id int) string
 }
 
+// CatalogCovers is the release↔cover-art store: the scraper's match job records
+// a cover for a release id, and the release page reads it back. Implemented by
+// the catalog plugin's service (same object as Catalog); look it up by type-
+// asserting the Catalog capability.
+type CatalogCovers interface {
+	SetReleaseCover(ctx context.Context, releaseID int64, coverURL string) error
+	ReleaseCover(ctx context.Context, releaseID int64) (url string, ok bool, err error)
+}
+
 const CatalogName = "catalog.taxonomy"
