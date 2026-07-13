@@ -74,10 +74,20 @@ func (p *Plugin) Provision(c *core.Core) error {
 	// (/plugin/dailyreward/claim) that inherits the host middleware stack.
 	c.Router.Mount("dailyreward").POST("/claim", p.claim)
 
-	return c.RegisterView(core.View{
+	if err := c.RegisterView(core.View{
 		Slug: "daily-reward", Title: "Daily reward", Slot: core.SlotSiteWidget,
 		MinRole: core.RoleUser, // logged-in only
 		Render:  p.renderWidget,
+	}); err != nil {
+		return err
+	}
+	// A streak card on any user's public profile (SlotUserWidget) — rendered
+	// for the profile SUBJECT via core.ViewSubject, showing that a plugin can
+	// contribute to profiles it knows nothing about.
+	return c.RegisterView(core.View{
+		Slug: "daily-streak", Title: "Daily streak", Slot: core.SlotUserWidget,
+		Public: true,
+		Render: p.renderProfileStreak,
 	})
 }
 

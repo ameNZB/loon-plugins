@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/ameNZB/loon/core"
 )
 
 // today/yesterday return civil date strings in UTC.
@@ -51,6 +53,26 @@ func (p *Plugin) renderWidget(c *gin.Context) (template.HTML, error) {
 		"Claimed": claimed,
 		"Reward":  rewardFor(nextStreak(st)),
 		"Captcha": p.captchaWidget(),
+	}); err != nil {
+		return "", err
+	}
+	return template.HTML(buf.String()), nil
+}
+
+// renderProfileStreak fills the SlotUserWidget streak card for the profile
+// subject (core.ViewSubject), not the current viewer.
+func (p *Plugin) renderProfileStreak(c *gin.Context) (template.HTML, error) {
+	id, ok := core.ViewSubject(c)
+	if !ok {
+		return "", nil
+	}
+	st, err := p.st.Get(c.Request.Context(), id)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := p.tmpl.ExecuteTemplate(&buf, "profile_streak.html", map[string]any{
+		"Streak": st.Streak, "Longest": st.Longest, "Total": st.TotalClaims,
 	}); err != nil {
 		return "", err
 	}
