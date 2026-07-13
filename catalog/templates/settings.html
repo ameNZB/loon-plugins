@@ -1,0 +1,24 @@
+{{if .Msg}}<div class="alert" style="border-color:var(--success);color:var(--success)">{{.Msg}}</div>{{end}}
+<div class="card">
+    <p class="text-muted small">Everything is listed — disable the categories you don't want the indexer to surface (Newznab caps + browse). New releases are auto-categorized from their group + title.</p>
+    <div class="table-responsive">
+        <table class="table table-dark table-sm align-middle">
+            <thead><tr><th>Category</th><th>Subcategories</th><th></th></tr></thead>
+            <tbody>
+            {{range .Categories}}
+                <tr>
+                    <td><strong>{{.Name}}</strong> <span class="text-muted small">{{.ID}}</span></td>
+                    <td class="text-muted small">{{.Subcats}}</td>
+                    <td>
+                        <form method="post" action="/admin/settings/catalog/toggle" style="display:inline">
+                            <input type="hidden" name="id" value="{{.ID}}">
+                            <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+                            <button class="btn btn-sm py-0 {{if .Enabled}}btn-primary{{else}}btn-outline-secondary{{end}}" type="submit">{{if .Enabled}}enabled{{else}}enable{{end}}</button>
+                        </form>
+                    </td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+    </div>
+</div>
