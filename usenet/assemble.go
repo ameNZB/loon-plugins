@@ -66,6 +66,7 @@ func (p *Plugin) runBuild(ctx context.Context) {
 			Title: title, Filename: safeFilename(title) + ".nzb",
 			Size: size, Group: k.Group, ContentHash: hashKey(k.Group, k.Base),
 			Posted: posted, Data: gz, Tags: parseTags(title),
+			CategoryID: p.categoryFor(k.Group, title),
 		})
 		if err != nil {
 			p.core.Errors.Report(ctx, "usenet/build-insert", err)
@@ -354,6 +355,7 @@ type nzbRow struct {
 	Posted      time.Time
 	Data        []byte
 	Tags        Tags
+	CategoryID  int
 }
 
 func (s *store) insertNzb(ctx context.Context, n nzbRow) (bool, error) {
@@ -365,11 +367,11 @@ func (s *store) insertNzb(ctx context.Context, n nzbRow) (bool, error) {
 		}
 		res, err := tx.ExecContext(ctx,
 			`INSERT INTO nzbs (title, filename, size, status, group_name, content_hash, posted_at,
-			                   nzb_data, nzb_data_bytes, resolution, source, video_codec, audio, language)
-			 VALUES ($1,$2,$3,'completed',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			                   nzb_data, nzb_data_bytes, resolution, source, video_codec, audio, language, category_id)
+			 VALUES ($1,$2,$3,'completed',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			 ON CONFLICT (content_hash) DO NOTHING`,
 			n.Title, n.Filename, n.Size, n.Group, n.ContentHash, posted, n.Data, len(n.Data),
-			n.Tags.Resolution, n.Tags.Source, n.Tags.Codec, n.Tags.Audio, n.Tags.Language)
+			n.Tags.Resolution, n.Tags.Source, n.Tags.Codec, n.Tags.Audio, n.Tags.Language, n.CategoryID)
 		if err != nil {
 			return err
 		}

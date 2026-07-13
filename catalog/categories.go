@@ -45,18 +45,26 @@ var catRules = []struct {
 	{3030, []string{"audiobook"}},
 	{3010, []string{"mp3", "320kbps", " m4a"}},
 	{4010, []string{"crack", "keygen", "0day", "activator", "regged"}},
-	{4020, []string{".iso", "installer", "portable"}},
+	{4020, []string{".iso", "installer", "portable", "setup"}},
 	{4050, []string{"repack", "fitgirl", "dodi", "-codex", "-plaza", "-flt"}},
 	{1000, []string{"nsw", "switch", "ps4", "ps5", "xbox", "-goldberg"}},
 	{2050, []string{"bluray", "blu-ray", "remux"}},
 	{5040, []string{"season", "hdtv", "pdtv"}},
 }
 
-// categorize maps a group + title to a best-fit Newznab category id. Keyword
-// heuristic; defaults to 8010 Other/Misc when nothing matches.
+// categorize maps a group + title to a best-fit Newznab category id. The TITLE
+// is the primary signal (it's the most specific); the GROUP name is only a
+// fallback for titles that keyword-match nothing — otherwise a group like
+// "a.b.multimedia.anime" would force every release (even an ebook) to Anime.
 func categorize(group, title string) int {
-	h := strings.ToLower(group + " " + title)
-	// TV episode pattern SxxExx is a strong TV signal.
+	if cat := categorizeText(strings.ToLower(title)); cat != 8010 {
+		return cat
+	}
+	return groupCategory(strings.ToLower(group))
+}
+
+// categorizeText applies the keyword/episode/resolution rules to one string.
+func categorizeText(h string) int {
 	if hasEpisodePattern(h) {
 		if strings.Contains(h, "anime") {
 			return 5070
@@ -70,9 +78,29 @@ func categorize(group, title string) int {
 			}
 		}
 	}
-	// Year in parens + movie-ish resolution → Movies/HD.
 	if strings.Contains(h, "1080p") || strings.Contains(h, "2160p") || strings.Contains(h, "720p") {
+		return 2040 // resolution with no other signal → Movies/HD
+	}
+	return 8010
+}
+
+// groupCategory infers a category from the newsgroup name alone.
+func groupCategory(g string) int {
+	switch {
+	case strings.Contains(g, "anime"):
+		return 5070
+	case strings.Contains(g, "erotica"), strings.Contains(g, "xxx"), strings.Contains(g, ".sex"):
+		return 6070
+	case strings.Contains(g, "ebook"), strings.Contains(g, "e-book"):
+		return 7020
+	case strings.Contains(g, "sound"), strings.Contains(g, "mp3"), strings.Contains(g, "music"):
+		return 3010
+	case strings.Contains(g, "console"), strings.Contains(g, "games"):
+		return 1000
+	case strings.Contains(g, "movie"):
 		return 2040
+	case strings.Contains(g, ".tv"), strings.Contains(g, "television"):
+		return 5040
 	}
 	return 8010
 }

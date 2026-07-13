@@ -33,6 +33,8 @@ type Catalog interface {
 	// Categorize maps a release to its best-fit Newznab category id from its
 	// group + title. Pure heuristic; does not consult the enabled set.
 	Categorize(group, title string) int
+	// Name returns a "Parent/Sub" display name for a category id.
+	Name(id int) string
 }
 
 const CatalogName = "catalog.taxonomy"

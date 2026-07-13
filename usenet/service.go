@@ -15,9 +15,21 @@ var errNoServer = errors.New("usenet: no server configured")
 // under both names in the web/all process.
 type service struct {
 	store           *store
-	retentionDays   int    // for the Newznab caps <retention> element
-	triggerCrawl    func() // set by the plugin in the worker/all process
-	triggerBackfill func() // set by the plugin in the worker/all process
+	retentionDays   int               // for the Newznab caps <retention> element
+	catalog         pluginapi.Catalog // optional — enabled categories + name resolution
+	triggerCrawl    func()            // set by the plugin in the worker/all process
+	triggerBackfill func()            // set by the plugin in the worker/all process
+}
+
+// withCategories fills the display Category name on each release from the
+// catalog (no-op when the catalog isn't installed).
+func (s *service) withCategories(rs []pluginapi.Release) []pluginapi.Release {
+	if s.catalog != nil {
+		for i := range rs {
+			rs[i].Category = s.catalog.Name(rs[i].CategoryID)
+		}
+	}
+	return rs
 }
 
 var (
@@ -47,11 +59,13 @@ func (h statHook) Stats(ctx context.Context) ([]pluginapi.Stat, error) {
 }
 
 func (s *service) Search(ctx context.Context, q string, limit int) ([]pluginapi.Release, error) {
-	return s.store.searchNzbs(ctx, q, limit)
+	rs, err := s.store.searchNzbs(ctx, q, limit)
+	return s.withCategories(rs), err
 }
 
 func (s *service) Browse(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
-	return s.store.browseNzbs(ctx, group, limit)
+	rs, err := s.store.browseNzbs(ctx, group, limit)
+	return s.withCategories(rs), err
 }
 
 func (s *service) Groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {
@@ -83,11 +97,14 @@ func (s *service) ReleaseByID(ctx context.Context, id int64) (pluginapi.ReleaseD
 		Release: pluginapi.Release{
 			ID: row.ID, Title: row.Title, Size: row.Size, Group: row.Group,
 			Resolution: row.Resolution, Source: row.Source, Codec: row.Codec,
-			Audio: row.Audio, Language: row.Language,
+			Audio: row.Audio, Language: row.Language, CategoryID: row.CategoryID,
 		},
 	}
 	if row.Posted.Valid {
 		d.Release.Posted = row.Posted.Time
+	}
+	if s.catalog != nil {
+		d.Release.Category = s.catalog.Name(row.CategoryID)
 	}
 	// Parse the gzipped NZB for the poster + per-file sizes.
 	if xmlBytes, err := gunzipBytes(row.Data); err == nil {

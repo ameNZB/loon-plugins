@@ -35,17 +35,21 @@ var capsTmpl = template.Must(template.New("caps").Funcs(newznabFuncs).Parse(
     <book-search available="no" supportedParams=""/>
   </searching>
   <categories>
-    <category id="5000" name="TV">
-      <subcat id="5070" name="TV/Anime"/>
+    {{- range .Categories}}
+    <category id="{{.ID}}" name="{{xmlesc .Name}}">
+      {{- range .Subcats}}
+      <subcat id="{{.ID}}" name="{{xmlesc .Name}}"/>
+      {{- end}}
     </category>
-    <category id="2000" name="Movies">
-      <subcat id="2060" name="Movies/Anime"/>
-    </category>
-    <category id="7000" name="Other">
-      <subcat id="7020" name="Other/Hashed"/>
-    </category>
+    {{- end}}
   </categories>
 </caps>`))
+
+// fallbackCats is the caps taxonomy when the catalog plugin isn't installed.
+var fallbackCats = []pluginapi.Category{
+	{ID: 5000, Name: "TV", Subcats: []pluginapi.Subcategory{{5070, "Anime"}}},
+	{ID: 8000, Name: "Other", Subcats: []pluginapi.Subcategory{{8010, "Misc"}}},
+}
 
 var feedTmpl = template.Must(template.New("feed").Funcs(newznabFuncs).Parse(
 	`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
@@ -119,9 +123,17 @@ func (s *service) newznabCaps(ctx context.Context, req pluginapi.NewznabRequest)
 	if s.retentionDays > 0 {
 		retention = s.retentionDays
 	}
+	// Advertise the admin-enabled categories from the catalog plugin; fall back
+	// to a minimal set when it isn't installed.
+	cats := fallbackCats
+	if s.catalog != nil {
+		if enabled, err := s.catalog.Enabled(ctx); err == nil && len(enabled) > 0 {
+			cats = enabled
+		}
+	}
 	var buf bytes.Buffer
 	if err := capsTmpl.Execute(&buf, map[string]any{
-		"Title": title(req), "BaseURL": req.BaseURL, "Retention": retention,
+		"Title": title(req), "BaseURL": req.BaseURL, "Retention": retention, "Categories": cats,
 	}); err != nil {
 		return pluginapi.NewznabResult{}, err
 	}
@@ -148,7 +160,7 @@ func (s *service) newznabFeed(ctx context.Context, req pluginapi.NewznabRequest)
 	if limit <= 0 {
 		limit = 50
 	}
-	releases, total, err := s.store.feedReleases(ctx, strings.TrimSpace(req.Query), limit, req.Offset)
+	releases, total, err := s.store.feedReleases(ctx, strings.TrimSpace(req.Query), req.Categories, limit, req.Offset)
 	if err != nil {
 		return pluginapi.NewznabResult{}, err
 	}
@@ -180,10 +192,13 @@ func (s *service) newznabFeed(ctx context.Context, req pluginapi.NewznabRequest)
 	return xmlResult(buf.Bytes()), nil
 }
 
-// newznabCategory maps a release to a Newznab category id. The lean indexer has
-// no movie/tv split, so everything is TV/Anime except hashed-looking titles.
+// newznabCategory returns the release's assigned Newznab category id (from the
+// catalog plugin at build time), defaulting to Other/Misc.
 func newznabCategory(r pluginapi.Release) string {
-	return "5070" // TV/Anime
+	if r.CategoryID > 0 {
+		return strconv.Itoa(r.CategoryID)
+	}
+	return "8010"
 }
 
 func title(req pluginapi.NewznabRequest) string {

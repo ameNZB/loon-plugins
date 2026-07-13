@@ -42,3 +42,7 @@ func (s *service) IsEnabled(ctx context.Context, categoryID int) (bool, error) {
 func (s *service) Categorize(group, title string) int {
 	return categorize(group, title)
 }
+
+func (s *service) Name(id int) string {
+	return categoryName(id)
+}

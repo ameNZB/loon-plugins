@@ -21,6 +21,8 @@ type Release struct {
 	Codec      string
 	Audio      string
 	Language   string
+	CategoryID int    // Newznab category id (from the catalog capability)
+	Category   string // display name, resolved when the catalog is present
 }
 
 // GroupInfo is one watched newsgroup + how many NZBs it has produced.
@@ -153,14 +155,15 @@ type UsenetAdmin interface {
 // download links clients follow; the plugin does not itself authenticate
 // (apikey validation is the host's concern — the demo runs open).
 type NewznabRequest struct {
-	Function string // t= : caps | search | tvsearch | movie | rss | get | details
-	Query    string // q=
-	Limit    int
-	Offset   int
-	ID       string // id= (get/details)
-	BaseURL  string // host public base, e.g. http://localhost:8090
-	Title    string // site title (caps/feed channel)
-	APIKey   string // passed through into download links; plugin may ignore
+	Function   string // t= : caps | search | tvsearch | movie | rss | get | details
+	Query      string // q=
+	Categories []int  // cat= (comma-separated Newznab ids)
+	Limit      int
+	Offset     int
+	ID         string // id= (get/details)
+	BaseURL    string // host public base, e.g. http://localhost:8090
+	Title      string // site title (caps/feed channel)
+	APIKey     string // passed through into download links; plugin may ignore
 }
 
 // NewznabResult is a rendered API response (XML feed/caps, or NZB bytes for get).

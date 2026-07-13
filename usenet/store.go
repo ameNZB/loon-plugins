@@ -3,6 +3,8 @@ package usenet
 import (
 	"context"
 	"database/sql"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -43,12 +45,13 @@ func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) 
 		Codec      string       `db:"video_codec"`
 		Audio      string       `db:"audio"`
 		Language   string       `db:"language"`
+		CategoryID int          `db:"category_id"`
 	}
 	var rows []row
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		return tx.SelectContext(ctx, &rows,
 			`SELECT id, title, size, posted_at, group_name,
-			        resolution, source, video_codec, audio, language
+			        resolution, source, video_codec, audio, language, category_id
 			 FROM nzbs
 			 WHERE status = 'completed' AND `+cond+`
 			 ORDER BY COALESCE(posted_at, created_at) DESC LIMIT $2`, arg, limit)
@@ -61,7 +64,7 @@ func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) 
 		out[i] = pluginapi.Release{
 			ID: r.ID, Title: r.Title, Size: r.Size, Group: r.Group,
 			Resolution: r.Resolution, Source: r.Source, Codec: r.Codec,
-			Audio: r.Audio, Language: r.Language,
+			Audio: r.Audio, Language: r.Language, CategoryID: r.CategoryID,
 		}
 		if r.Posted.Valid {
 			out[i].Posted = r.Posted.Time
@@ -73,12 +76,21 @@ func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) 
 // feedReleases pages completed releases for the Newznab feed: optional title
 // filter (empty = recent-all), newest first, with the matching total for the
 // newznab:response offset/total attrs. query flows through $1 (no injection).
-func (s *store) feedReleases(ctx context.Context, query string, limit, offset int) ([]pluginapi.Release, int, error) {
+func (s *store) feedReleases(ctx context.Context, query string, cats []int, limit, offset int) ([]pluginapi.Release, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
 	if offset < 0 {
 		offset = 0
+	}
+	// cat filter: category ids are ints, so an inlined IN() list is injection-safe.
+	catClause := ""
+	if len(cats) > 0 {
+		parts := make([]string, 0, len(cats))
+		for _, c := range cats {
+			parts = append(parts, strconv.Itoa(c))
+		}
+		catClause = " AND category_id IN (" + strings.Join(parts, ",") + ")"
 	}
 	type row struct {
 		ID         int64        `db:"id"`
@@ -91,20 +103,21 @@ func (s *store) feedReleases(ctx context.Context, query string, limit, offset in
 		Codec      string       `db:"video_codec"`
 		Audio      string       `db:"audio"`
 		Language   string       `db:"language"`
+		CategoryID int          `db:"category_id"`
 	}
 	var rows []row
 	var total int
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		if err := tx.GetContext(ctx, &total,
 			`SELECT COUNT(*) FROM nzbs
-			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')`, query); err != nil {
+			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')`+catClause, query); err != nil {
 			return err
 		}
 		return tx.SelectContext(ctx, &rows,
 			`SELECT id, title, size, posted_at, group_name,
-			        resolution, source, video_codec, audio, language
+			        resolution, source, video_codec, audio, language, category_id
 			 FROM nzbs
-			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')
+			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')`+catClause+`
 			 ORDER BY COALESCE(posted_at, created_at) DESC
 			 LIMIT $2 OFFSET $3`, query, limit, offset)
 	})
@@ -116,7 +129,7 @@ func (s *store) feedReleases(ctx context.Context, query string, limit, offset in
 		out[i] = pluginapi.Release{
 			ID: r.ID, Title: r.Title, Size: r.Size, Group: r.Group,
 			Resolution: r.Resolution, Source: r.Source, Codec: r.Codec,
-			Audio: r.Audio, Language: r.Language,
+			Audio: r.Audio, Language: r.Language, CategoryID: r.CategoryID,
 		}
 		if r.Posted.Valid {
 			out[i].Posted = r.Posted.Time
@@ -220,6 +233,7 @@ type detailRow struct {
 	Codec      string       `db:"video_codec"`
 	Audio      string       `db:"audio"`
 	Language   string       `db:"language"`
+	CategoryID int          `db:"category_id"`
 	Data       []byte       `db:"nzb_data"`
 }
 
@@ -229,7 +243,7 @@ func (s *store) releaseByID(ctx context.Context, id int64) (*detailRow, error) {
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
 		return tx.GetContext(ctx, &r,
 			`SELECT id, title, size, posted_at, group_name,
-			        resolution, source, video_codec, audio, language, nzb_data
+			        resolution, source, video_codec, audio, language, category_id, nzb_data
 			 FROM nzbs WHERE id = $1 AND status = 'completed'`, id)
 	})
 	if err == sql.ErrNoRows {
@@ -487,6 +501,39 @@ func (s *store) retagUntagged(ctx context.Context, limit int) (int, error) {
 			if _, err := tx.ExecContext(ctx,
 				`UPDATE nzbs SET resolution=$2, source=$3, video_codec=$4, audio=$5, language=$6 WHERE id=$1`,
 				r.ID, t.Resolution, t.Source, t.Codec, t.Audio, t.Language); err != nil {
+				return err
+			}
+			updated++
+		}
+		return nil
+	})
+	return updated, err
+}
+
+// recategorizeDefaults reassigns the category of releases still at the default
+// (8010 Other/Misc) — rows built before categorization, or before a rule change.
+// fn is the catalog's Categorize; only changed rows are written.
+func (s *store) recategorizeDefaults(ctx context.Context, fn func(group, title string) int, limit int) (int, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	updated := 0
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		var rows []struct {
+			ID    int64  `db:"id"`
+			Group string `db:"group_name"`
+			Title string `db:"title"`
+		}
+		if err := tx.SelectContext(ctx, &rows,
+			`SELECT id, group_name, title FROM nzbs WHERE category_id = 8010 LIMIT $1`, limit); err != nil {
+			return err
+		}
+		for _, r := range rows {
+			cat := fn(r.Group, r.Title)
+			if cat == 8010 {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE nzbs SET category_id = $2 WHERE id = $1`, r.ID, cat); err != nil {
 				return err
 			}
 			updated++

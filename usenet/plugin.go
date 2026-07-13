@@ -30,12 +30,13 @@ func init() {
 }
 
 type Plugin struct {
-	core *core.Core
-	cfg  Config
-	ctx  context.Context
-	st   *store
-	svc  *service
-	tmpl *template.Template // admin-view fragments (views.go)
+	core    *core.Core
+	cfg     Config
+	ctx     context.Context
+	st      *store
+	svc     *service
+	tmpl    *template.Template // admin-view fragments (views.go)
+	catalog pluginapi.Catalog  // optional — the content-taxonomy plugin (looked up in Start)
 
 	crawlJob    core.Job
 	backfillJob core.Job
@@ -120,6 +121,15 @@ func (p *Plugin) Provision(c *core.Core) error {
 
 func (p *Plugin) Start(ctx context.Context) error {
 	p.ctx = ctx
+	// Look up the content-taxonomy plugin (optional). Done in Start, not
+	// Provision, since plugin provision order isn't guaranteed. Both processes
+	// need it: web for Newznab caps + display, worker for build categorization.
+	if v, ok := p.core.Lookup(pluginapi.CatalogName); ok {
+		if cat, ok := v.(pluginapi.Catalog); ok {
+			p.catalog = cat
+			p.svc.catalog = cat
+		}
+	}
 	if p.crawlJob == nil {
 		return nil // web-only process: capability is registered, no jobs run here
 	}
@@ -149,10 +159,28 @@ func (p *Plugin) runTagFill(ctx context.Context) {
 		return
 	}
 	p.tagJob.Log("re-tagged %d NZB(s)", n)
+	// Recategorize releases still at the default (built before categorization or
+	// before a catalog-rule change).
+	if p.catalog != nil {
+		if rc, err := p.st.recategorizeDefaults(ctx, p.catalog.Categorize, 2000); err != nil {
+			p.core.Errors.Report(ctx, "usenet/recategorize", err)
+		} else if rc > 0 {
+			p.tagJob.Log("recategorized %d release(s)", rc)
+		}
+	}
 	p.tagJob.SetIdle(time.Now().Add(6 * time.Hour))
 }
 
 func (p *Plugin) Stop(ctx context.Context) error { return nil }
+
+// categoryFor returns the Newznab category id for a release via the catalog
+// plugin, or 8010 (Other/Misc) when the catalog isn't installed.
+func (p *Plugin) categoryFor(group, title string) int {
+	if p.catalog != nil {
+		return p.catalog.Categorize(group, title)
+	}
+	return 8010
+}
 
 // seedServer inserts the config server if the table is empty (best-effort). Runs
 // in Start (not Provision — no I/O there) so the crawler has a server to use.
