@@ -102,6 +102,21 @@ type Server struct {
 	Enabled  bool
 }
 
+// ReleaseFile is one file inside an assembled release (parsed from the NZB).
+type ReleaseFile struct {
+	Filename string
+	Bytes    int64
+	Segments int
+}
+
+// ReleaseDetail is a single release plus its poster and file list, for the
+// release-detail page.
+type ReleaseDetail struct {
+	Release
+	Poster string
+	Files  []ReleaseFile
+}
+
 // UsenetIndex is the public read surface — registered in the web/all process.
 type UsenetIndex interface {
 	Search(ctx context.Context, query string, limit int) ([]Release, error)
@@ -110,6 +125,8 @@ type UsenetIndex interface {
 	Groups(ctx context.Context) ([]GroupInfo, error)
 	// NZB returns the decompressed .nzb bytes + a suggested download filename.
 	NZB(ctx context.Context, id int64) (data []byte, filename string, err error)
+	// ReleaseByID returns one release with its file list; ok is false if absent.
+	ReleaseByID(ctx context.Context, id int64) (detail ReleaseDetail, ok bool, err error)
 }
 
 // UsenetAdmin is the setup-wizard surface — registered in the web/all process.

@@ -2,6 +2,7 @@ package usenet
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 
 	"github.com/ameNZB/loon-plugins/pluginapi"
@@ -67,6 +68,48 @@ func (s *service) NZB(ctx context.Context, id int64) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return data, filename, nil
+}
+
+// ReleaseByID loads one release and parses its stored NZB into a file list.
+func (s *service) ReleaseByID(ctx context.Context, id int64) (pluginapi.ReleaseDetail, bool, error) {
+	row, err := s.store.releaseByID(ctx, id)
+	if err != nil {
+		return pluginapi.ReleaseDetail{}, false, err
+	}
+	if row == nil {
+		return pluginapi.ReleaseDetail{}, false, nil
+	}
+	d := pluginapi.ReleaseDetail{
+		Release: pluginapi.Release{
+			ID: row.ID, Title: row.Title, Size: row.Size, Group: row.Group,
+			Resolution: row.Resolution, Source: row.Source, Codec: row.Codec,
+			Audio: row.Audio, Language: row.Language,
+		},
+	}
+	if row.Posted.Valid {
+		d.Release.Posted = row.Posted.Time
+	}
+	// Parse the gzipped NZB for the poster + per-file sizes.
+	if xmlBytes, err := gunzipBytes(row.Data); err == nil {
+		var doc nzbDoc
+		if xml.Unmarshal(xmlBytes, &doc) == nil {
+			for i, f := range doc.Files {
+				if i == 0 {
+					d.Poster = f.Poster
+				}
+				var bytes int64
+				for _, seg := range f.Segments.Segment {
+					bytes += seg.Bytes
+				}
+				d.Files = append(d.Files, pluginapi.ReleaseFile{
+					Filename: fileNameFromSubject(f.Subject),
+					Bytes:    bytes,
+					Segments: len(f.Segments.Segment),
+				})
+			}
+		}
+	}
+	return d, true, nil
 }
 
 func (s *service) Server(ctx context.Context) (pluginapi.Server, error) {

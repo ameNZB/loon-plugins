@@ -12,7 +12,22 @@ var (
 	reYenc   = regexp.MustCompile(`(?i)\byenc\b`)
 	reExt    = regexp.MustCompile(`(?i)\.(mkv|mp4|avi|mov|ts|nfo|sfv|par2|rar|r\d{2,3}|nzb|zip|7z|mp3|flac|iso|img|srt|ass|jpg|png)\b`)
 	reWS     = regexp.MustCompile(`\s+`)
+	reQuoted = regexp.MustCompile(`"([^"]+)"`) // "filename.ext" inside a subject
 )
+
+// fileNameFromSubject pulls a display filename from an article subject: the
+// quoted "file.ext" if present, else the subject with markers stripped.
+func fileNameFromSubject(subject string) string {
+	if m := reQuoted.FindStringSubmatch(subject); m != nil {
+		if f := strings.TrimSpace(m[1]); f != "" {
+			return f
+		}
+	}
+	if b := cleanBase(stripAllMarkers(subject)); b != "" {
+		return b
+	}
+	return strings.TrimSpace(subject)
+}
 
 // parseSubject parses a Usenet subject into the fields the crawler stages. It
 // handles the two dominant yEnc forms:

@@ -208,6 +208,39 @@ func (s *store) groups(ctx context.Context) ([]pluginapi.GroupInfo, error) {
 	return out, nil
 }
 
+// detailRow is a release row with its gzipped NZB blob, for the detail page.
+type detailRow struct {
+	ID         int64        `db:"id"`
+	Title      string       `db:"title"`
+	Size       int64        `db:"size"`
+	Posted     sql.NullTime `db:"posted_at"`
+	Group      string       `db:"group_name"`
+	Resolution string       `db:"resolution"`
+	Source     string       `db:"source"`
+	Codec      string       `db:"video_codec"`
+	Audio      string       `db:"audio"`
+	Language   string       `db:"language"`
+	Data       []byte       `db:"nzb_data"`
+}
+
+// releaseByID loads one completed release + its NZB blob; nil if absent.
+func (s *store) releaseByID(ctx context.Context, id int64) (*detailRow, error) {
+	var r detailRow
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		return tx.GetContext(ctx, &r,
+			`SELECT id, title, size, posted_at, group_name,
+			        resolution, source, video_codec, audio, language, nzb_data
+			 FROM nzbs WHERE id = $1 AND status = 'completed'`, id)
+	})
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 func (s *store) nzbData(ctx context.Context, id int64) ([]byte, string, error) {
 	var data []byte
 	var filename string
