@@ -124,6 +124,9 @@ type UsenetIndex interface {
 	Search(ctx context.Context, query string, limit int) ([]Release, error)
 	// Browse lists recent releases, optionally filtered to one group (empty = all).
 	Browse(ctx context.Context, group string, limit int) ([]Release, error)
+	// Feed lists recent releases filtered to one or more Newznab category ids
+	// (empty = all), paginated. Returns the page plus the total match count.
+	Feed(ctx context.Context, cats []int, limit, offset int) ([]Release, int, error)
 	Groups(ctx context.Context) ([]GroupInfo, error)
 	// NZB returns the decompressed .nzb bytes + a suggested download filename.
 	NZB(ctx context.Context, id int64) (data []byte, filename string, err error)

@@ -63,6 +63,14 @@ func (s *service) Search(ctx context.Context, q string, limit int) ([]pluginapi.
 	return s.withCategories(rs), err
 }
 
+func (s *service) Feed(ctx context.Context, cats []int, limit, offset int) ([]pluginapi.Release, int, error) {
+	rs, total, err := s.store.feedReleases(ctx, "", cats, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	return s.withCategories(rs), total, nil
+}
+
 func (s *service) Browse(ctx context.Context, group string, limit int) ([]pluginapi.Release, error) {
 	rs, err := s.store.browseNzbs(ctx, group, limit)
 	return s.withCategories(rs), err
