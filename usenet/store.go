@@ -56,6 +56,7 @@ func (s *PGStore) queryReleases(ctx context.Context, cond, arg string, limit int
 	}
 	var rows []row
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		// sqllint:allow cond is a fixed WHERE fragment from the two internal callers (searchNzbs/browseNzbs); the search value flows through $1
 		return tx.SelectContext(ctx, &rows,
 			`SELECT id, title, size, posted_at, group_name,
 			        resolution, source, video_codec, audio, language, category_id
@@ -115,11 +116,13 @@ func (s *PGStore) feedReleases(ctx context.Context, query string, cats []int, li
 	var rows []row
 	var total int
 	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		// sqllint:allow catClause is a literal built from int-only category ids (strconv.Itoa); all values flow through $N
 		if err := tx.GetContext(ctx, &total,
 			`SELECT COUNT(*) FROM nzbs
 			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')`+catClause, query); err != nil {
 			return err
 		}
+		// sqllint:allow catClause is a literal built from int-only category ids (strconv.Itoa); all values flow through $N
 		return tx.SelectContext(ctx, &rows,
 			`SELECT id, title, size, posted_at, group_name,
 			        resolution, source, video_codec, audio, language, category_id
@@ -428,9 +431,11 @@ func (s *PGStore) builderInfo(ctx context.Context, limit int) (BuilderInfo, erro
 			         base_subject, COUNT(*) AS segs
 			  FROM articles GROUP BY group_name, base_subject
 			)`
+		// sqllint:allow setsCTE is a const CTE concatenated with a literal tail; no interpolation
 		if err := tx.GetContext(ctx, &bi.Releases, setsCTE+` SELECT COUNT(*) FROM sets`); err != nil {
 			return err
 		}
+		// sqllint:allow setsCTE is a const CTE concatenated with a literal tail; no interpolation
 		if err := tx.GetContext(ctx, &bi.Ready, setsCTE+` SELECT COUNT(*) FROM sets WHERE need > 0 AND have >= need`); err != nil {
 			return err
 		}
@@ -441,6 +446,7 @@ func (s *PGStore) builderInfo(ctx context.Context, limit int) (BuilderInfo, erro
 			Segs  int    `db:"segs"`
 			Multi bool   `db:"multi"`
 		}
+		// sqllint:allow setsCTE is a const CTE concatenated with a literal tail; no interpolation
 		if err := tx.SelectContext(ctx, &rows, setsCTE+`
 			SELECT base_subject, have, need, segs, multi FROM sets
 			WHERE NOT (need > 0 AND have >= need)
