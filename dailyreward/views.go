@@ -1,0 +1,85 @@
+package dailyreward
+
+import (
+	"bytes"
+	"fmt"
+	"html/template"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+// today/yesterday return civil date strings in UTC.
+func today() string     { return time.Now().UTC().Format("2006-01-02") }
+func yesterday() string { return time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02") }
+
+// nextStreak is the streak a claim right now would produce (for the button label).
+func nextStreak(st state) int {
+	switch st.LastClaim {
+	case today():
+		return st.Streak // already claimed
+	case yesterday():
+		return st.Streak + 1
+	default:
+		return 1
+	}
+}
+
+func (p *Plugin) captchaWidget() template.HTML {
+	if p.captcha == nil {
+		return ""
+	}
+	return p.captcha.WidgetHTML()
+}
+
+func (p *Plugin) renderWidget(c *gin.Context) (template.HTML, error) {
+	u, ok := p.core.Auth.CurrentUser(c)
+	if !ok {
+		return "", nil // MinRole gate should prevent this; render nothing
+	}
+	st, err := p.st.get(c.Request.Context(), u.ID)
+	if err != nil {
+		return "", err
+	}
+	claimed := st.LastClaim == today()
+	var buf bytes.Buffer
+	if err := p.tmpl.ExecuteTemplate(&buf, "widget.html", map[string]any{
+		"Streak":  st.Streak,
+		"Longest": st.Longest,
+		"Total":   st.TotalClaims,
+		"Claimed": claimed,
+		"Reward":  rewardFor(nextStreak(st)),
+		"Captcha": p.captchaWidget(),
+	}); err != nil {
+		return "", err
+	}
+	return template.HTML(buf.String()), nil
+}
+
+func (p *Plugin) claim(c *gin.Context) {
+	u, ok := p.core.Auth.CurrentUser(c)
+	if !ok {
+		c.Redirect(http.StatusSeeOther, "/login")
+		return
+	}
+	if p.captcha != nil {
+		if err := p.captcha.Verify(c.Request.Context(), c.PostForm("cf-turnstile-response"), c.ClientIP()); err != nil {
+			c.Redirect(http.StatusSeeOther, "/")
+			return
+		}
+	}
+	streak, reward, claimed, err := p.st.claim(c.Request.Context(), u.ID, today(), yesterday())
+	if err != nil {
+		p.core.LoggerFor("dailyreward").Error("claim", "err", err)
+		c.Redirect(http.StatusSeeOther, "/")
+		return
+	}
+	if claimed {
+		if _, err := p.core.Points.Award(c.Request.Context(), u.ID, reward, "earn_daily",
+			fmt.Sprintf("Daily login reward (streak %d)", streak), 0); err != nil {
+			p.core.LoggerFor("dailyreward").Error("award", "err", err)
+		}
+	}
+	c.Redirect(http.StatusSeeOther, "/")
+}

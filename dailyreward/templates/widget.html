@@ -1,0 +1,21 @@
+<div class="card">
+  <div class="card-body">
+    <h5 class="card-title mb-1">Daily reward</h5>
+    {{if .Claimed}}
+      <p class="text-muted small mb-2">Claimed today &mdash; come back tomorrow to keep your streak.</p>
+    {{else}}
+      <p class="text-muted small mb-2">Claim today's reward for <strong>+{{.Reward}}</strong> points.</p>
+    {{end}}
+    <div class="d-flex gap-3 small text-muted mb-2">
+      <span>Streak <strong>{{.Streak}}</strong></span>
+      <span>Best <strong>{{.Longest}}</strong></span>
+      <span>Claims <strong>{{.Total}}</strong></span>
+    </div>
+    {{if not .Claimed}}
+    <form method="post" action="/plugin/dailyreward/claim">
+      {{.Captcha}}
+      <button class="btn btn-primary btn-sm mt-2" type="submit">Claim +{{.Reward}} points</button>
+    </form>
+    {{end}}
+  </div>
+</div>
