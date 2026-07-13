@@ -14,6 +14,7 @@ var errNoServer = errors.New("usenet: no server configured")
 // under both names in the web/all process.
 type service struct {
 	store           *store
+	retentionDays   int    // for the Newznab caps <retention> element
 	triggerCrawl    func() // set by the plugin in the worker/all process
 	triggerBackfill func() // set by the plugin in the worker/all process
 }

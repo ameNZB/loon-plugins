@@ -70,6 +70,61 @@ func (s *store) queryReleases(ctx context.Context, cond, arg string, limit int) 
 	return out, nil
 }
 
+// feedReleases pages completed releases for the Newznab feed: optional title
+// filter (empty = recent-all), newest first, with the matching total for the
+// newznab:response offset/total attrs. query flows through $1 (no injection).
+func (s *store) feedReleases(ctx context.Context, query string, limit, offset int) ([]pluginapi.Release, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	type row struct {
+		ID         int64        `db:"id"`
+		Title      string       `db:"title"`
+		Size       int64        `db:"size"`
+		Posted     sql.NullTime `db:"posted_at"`
+		Group      string       `db:"group_name"`
+		Resolution string       `db:"resolution"`
+		Source     string       `db:"source"`
+		Codec      string       `db:"video_codec"`
+		Audio      string       `db:"audio"`
+		Language   string       `db:"language"`
+	}
+	var rows []row
+	var total int
+	err := s.db.WithTx(ctx, func(tx *sqlx.Tx) error {
+		if err := tx.GetContext(ctx, &total,
+			`SELECT COUNT(*) FROM nzbs
+			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')`, query); err != nil {
+			return err
+		}
+		return tx.SelectContext(ctx, &rows,
+			`SELECT id, title, size, posted_at, group_name,
+			        resolution, source, video_codec, audio, language
+			 FROM nzbs
+			 WHERE status = 'completed' AND ($1 = '' OR title ILIKE '%' || $1 || '%')
+			 ORDER BY COALESCE(posted_at, created_at) DESC
+			 LIMIT $2 OFFSET $3`, query, limit, offset)
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]pluginapi.Release, len(rows))
+	for i, r := range rows {
+		out[i] = pluginapi.Release{
+			ID: r.ID, Title: r.Title, Size: r.Size, Group: r.Group,
+			Resolution: r.Resolution, Source: r.Source, Codec: r.Codec,
+			Audio: r.Audio, Language: r.Language,
+		}
+		if r.Posted.Valid {
+			out[i].Posted = r.Posted.Time
+		}
+	}
+	return out, total, nil
+}
+
 // stats returns crawl progress: total NZBs, total staged articles, and per
 // active-group status (NZBs, staged, last crawl, watermark vs server high).
 func (s *store) stats(ctx context.Context) (pluginapi.IndexStats, error) {

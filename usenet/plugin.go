@@ -68,7 +68,7 @@ func (p *Plugin) Provision(c *core.Core) error {
 		return fmt.Errorf("usenet: config: %w", err)
 	}
 	p.cfg.applyDefaults()
-	p.svc = &service{store: p.st}
+	p.svc = &service{store: p.st, retentionDays: p.cfg.RetentionDays}
 
 	// Contribute indexer totals to the stats snapshot (collected in the worker
 	// process; registering everywhere is harmless).
@@ -84,6 +84,9 @@ func (p *Plugin) Provision(c *core.Core) error {
 			return err
 		}
 		if err := c.Register(pluginapi.UsenetAdminName, p.svc); err != nil {
+			return err
+		}
+		if err := c.Register(pluginapi.UsenetNewznabName, p.svc); err != nil {
 			return err
 		}
 		if err := p.registerViews(c); err != nil {

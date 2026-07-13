@@ -130,7 +130,36 @@ type UsenetAdmin interface {
 	ResetBackfill(ctx context.Context, name string) error
 }
 
+// NewznabRequest is a parsed Newznab/Torznab API call. The host mounts /api +
+// /rss, parses the query string into this, and hands it to the plugin — which
+// owns the whole XML contract. BaseURL + APIKey let the plugin build the
+// download links clients follow; the plugin does not itself authenticate
+// (apikey validation is the host's concern — the demo runs open).
+type NewznabRequest struct {
+	Function string // t= : caps | search | tvsearch | movie | rss | get | details
+	Query    string // q=
+	Limit    int
+	Offset   int
+	ID       string // id= (get/details)
+	BaseURL  string // host public base, e.g. http://localhost:8090
+	Title    string // site title (caps/feed channel)
+	APIKey   string // passed through into download links; plugin may ignore
+}
+
+// NewznabResult is a rendered API response (XML feed/caps, or NZB bytes for get).
+type NewznabResult struct {
+	Body        []byte
+	ContentType string
+	Filename    string // set for get → Content-Disposition
+}
+
+// UsenetNewznab is the Newznab/Torznab API surface — registered in web/all.
+type UsenetNewznab interface {
+	Newznab(ctx context.Context, req NewznabRequest) (NewznabResult, error)
+}
+
 const (
-	UsenetIndexName = "usenet.index"
-	UsenetAdminName = "usenet.admin"
+	UsenetIndexName   = "usenet.index"
+	UsenetAdminName   = "usenet.admin"
+	UsenetNewznabName = "usenet.newznab"
 )

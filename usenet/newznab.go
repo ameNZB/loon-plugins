@@ -1,0 +1,203 @@
+package usenet
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"strconv"
+	"strings"
+	"text/template"
+	"time"
+
+	"github.com/ameNZB/loon-plugins/pluginapi"
+)
+
+// Newznab/Torznab API. The plugin owns the whole XML contract (caps + search
+// feed + get); the host mounts /api + /rss and delegates here. Ported from the
+// prod site's api_handler.go, trimmed to what the lean indexer exposes (no
+// per-user apikey/limit accounting — that stays the host's concern).
+
+var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&apos;")
+
+var newznabFuncs = template.FuncMap{"xmlesc": xmlEscaper.Replace}
+
+var capsTmpl = template.Must(template.New("caps").Funcs(newznabFuncs).Parse(
+	`<?xml version="1.0" encoding="UTF-8"?><caps>
+  <server appversion="1.0" version="0.1" title="{{xmlesc .Title}}" strapline="loon demo indexer" email="" url="{{.BaseURL}}" image=""/>
+  <limits max="100" default="50"/>
+  <retention days="{{.Retention}}"/>
+  <registration available="no" open="no"/>
+  <searching>
+    <search available="yes" supportedParams="q,cat,limit,offset"/>
+    <tv-search available="yes" supportedParams="q,cat,limit,offset,season,ep"/>
+    <movie-search available="yes" supportedParams="q,cat,limit,offset"/>
+    <audio-search available="no" supportedParams=""/>
+    <book-search available="no" supportedParams=""/>
+  </searching>
+  <categories>
+    <category id="5000" name="TV">
+      <subcat id="5070" name="TV/Anime"/>
+    </category>
+    <category id="2000" name="Movies">
+      <subcat id="2060" name="Movies/Anime"/>
+    </category>
+    <category id="7000" name="Other">
+      <subcat id="7020" name="Other/Hashed"/>
+    </category>
+  </categories>
+</caps>`))
+
+var feedTmpl = template.Must(template.New("feed").Funcs(newznabFuncs).Parse(
+	`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <title>{{xmlesc .Title}}</title>
+    <description>{{xmlesc .Title}} NZB Search</description>
+    <link>{{.BaseURL}}</link>
+    <newznab:response offset="{{.Offset}}" total="{{.Total}}"/>
+    {{- range .Items}}
+    <item>
+      <title>{{xmlesc .Title}}</title>
+      <guid isPermaLink="true">{{xmlesc .DownloadURL}}</guid>
+      <link>{{xmlesc .DownloadURL}}</link>
+      <pubDate>{{.PubDate}}</pubDate>
+      <enclosure url="{{xmlesc .DownloadURL}}" length="{{.Size}}" type="application/x-nzb"/>
+      <newznab:attr name="category" value="{{.Category}}"/>
+      <newznab:attr name="size" value="{{.Size}}"/>
+      <newznab:attr name="guid" value="{{.ID}}"/>
+      <newznab:attr name="grabs" value="0"/>
+      <newznab:attr name="files" value="1"/>
+      <newznab:attr name="nzbname" value="{{xmlesc .Filename}}"/>
+      {{- if .Resolution}}
+      <newznab:attr name="resolution" value="{{xmlesc .Resolution}}"/>
+      {{- end}}
+      {{- if .Source}}
+      <newznab:attr name="source" value="{{xmlesc .Source}}"/>
+      {{- end}}
+      {{- if .Language}}
+      <newznab:attr name="language" value="{{xmlesc .Language}}"/>
+      {{- end}}
+      {{- if .Codec}}
+      <newznab:attr name="video" value="{{xmlesc .Codec}}"/>
+      {{- end}}
+    </item>
+    {{- end}}
+  </channel>
+</rss>`))
+
+type feedItem struct {
+	ID          int64
+	Title       string
+	Filename    string
+	DownloadURL string
+	PubDate     string
+	Size        int64
+	Category    string
+	Resolution  string
+	Source      string
+	Language    string
+	Codec       string
+}
+
+var _ pluginapi.UsenetNewznab = (*service)(nil)
+
+// Newznab dispatches on the t= function, mirroring prod's Handle().
+func (s *service) Newznab(ctx context.Context, req pluginapi.NewznabRequest) (pluginapi.NewznabResult, error) {
+	switch req.Function {
+	case "caps":
+		return s.newznabCaps(ctx, req)
+	case "get", "details":
+		return s.newznabGet(ctx, req)
+	case "search", "tvsearch", "movie", "rss", "":
+		return s.newznabFeed(ctx, req)
+	default:
+		return apiError(202, "No such function"), nil
+	}
+}
+
+func (s *service) newznabCaps(ctx context.Context, req pluginapi.NewznabRequest) (pluginapi.NewznabResult, error) {
+	retention := 3
+	if s.retentionDays > 0 {
+		retention = s.retentionDays
+	}
+	var buf bytes.Buffer
+	if err := capsTmpl.Execute(&buf, map[string]any{
+		"Title": title(req), "BaseURL": req.BaseURL, "Retention": retention,
+	}); err != nil {
+		return pluginapi.NewznabResult{}, err
+	}
+	return xmlResult(buf.Bytes()), nil
+}
+
+func (s *service) newznabGet(ctx context.Context, req pluginapi.NewznabRequest) (pluginapi.NewznabResult, error) {
+	id, err := strconv.ParseInt(strings.TrimSpace(req.ID), 10, 64)
+	if err != nil {
+		return apiError(200, "Missing or invalid parameter (id)"), nil
+	}
+	data, filename, err := s.NZB(ctx, id)
+	if err != nil || len(data) == 0 {
+		return apiError(300, "No such item"), nil
+	}
+	if filename == "" {
+		filename = "download.nzb"
+	}
+	return pluginapi.NewznabResult{Body: data, ContentType: "application/x-nzb", Filename: filename}, nil
+}
+
+func (s *service) newznabFeed(ctx context.Context, req pluginapi.NewznabRequest) (pluginapi.NewznabResult, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	releases, total, err := s.store.feedReleases(ctx, strings.TrimSpace(req.Query), limit, req.Offset)
+	if err != nil {
+		return pluginapi.NewznabResult{}, err
+	}
+	items := make([]feedItem, len(releases))
+	for i, r := range releases {
+		dl := fmt.Sprintf("%s/api?t=get&id=%d", req.BaseURL, r.ID)
+		if req.APIKey != "" {
+			dl += "&apikey=" + req.APIKey
+		}
+		pub := ""
+		if !r.Posted.IsZero() {
+			pub = r.Posted.UTC().Format(time.RFC1123Z)
+		} else {
+			pub = time.Now().UTC().Format(time.RFC1123Z)
+		}
+		items[i] = feedItem{
+			ID: r.ID, Title: r.Title, Filename: r.Title + ".nzb",
+			DownloadURL: dl, PubDate: pub, Size: r.Size, Category: newznabCategory(r),
+			Resolution: r.Resolution, Source: r.Source, Language: r.Language, Codec: r.Codec,
+		}
+	}
+	var buf bytes.Buffer
+	if err := feedTmpl.Execute(&buf, map[string]any{
+		"Title": title(req), "BaseURL": req.BaseURL,
+		"Offset": req.Offset, "Total": total, "Items": items,
+	}); err != nil {
+		return pluginapi.NewznabResult{}, err
+	}
+	return xmlResult(buf.Bytes()), nil
+}
+
+// newznabCategory maps a release to a Newznab category id. The lean indexer has
+// no movie/tv split, so everything is TV/Anime except hashed-looking titles.
+func newznabCategory(r pluginapi.Release) string {
+	return "5070" // TV/Anime
+}
+
+func title(req pluginapi.NewznabRequest) string {
+	if req.Title != "" {
+		return req.Title
+	}
+	return "loon demo indexer"
+}
+
+func xmlResult(body []byte) pluginapi.NewznabResult {
+	return pluginapi.NewznabResult{Body: body, ContentType: "application/xml; charset=UTF-8"}
+}
+
+func apiError(code int, desc string) pluginapi.NewznabResult {
+	return xmlResult([]byte(fmt.Sprintf(
+		`<?xml version="1.0" encoding="UTF-8"?><error code="%d" description="%s"/>`, code, desc)))
+}
