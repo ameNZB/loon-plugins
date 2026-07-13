@@ -77,6 +77,15 @@ func isJunkTitle(title string) bool {
 		return true
 	}
 
+	// Bare single token (no separators at all) that mixes upper+lower case at
+	// 16+ chars — a hash / obfuscated name. Real releases ALWAYS carry a
+	// separator (space/dot/dash/bracket), so a naked mixed-case run is machine
+	// junk. Catches the 16-23 char tokens that slip under the 24+ rule above.
+	if len(t) >= 16 && !hasSeparator(t) &&
+		containsAny(t, 'A', 'Z') && containsAny(t, 'a', 'z') {
+		return true
+	}
+
 	// multi-segment random chaos: 2+ segments (split on _ or space) of 5+ chars
 	// that each mix upper, lower, AND digit. Real tokens rarely do all three,
 	// almost never in two segments.
@@ -181,6 +190,16 @@ func toLowerTail(s string) string {
 
 func hasSuffix(s, suf string) bool {
 	return len(s) >= len(suf) && s[len(s)-len(suf):] == suf
+}
+
+func hasSeparator(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '.', '_', '-', '[', ']', '(', ')', '{', '}', '\'', '"', '|', '/', '\\':
+			return true
+		}
+	}
+	return false
 }
 
 func containsAny(s string, lo, hi byte) bool {

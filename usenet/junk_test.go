@@ -11,6 +11,8 @@ func TestIsJunkTitle(t *testing.T) {
 		"n9pmKSuLKSyOP5wcDMLmnv_66qv9uJneqQusjTH4NZx_EY89VIWnGO_33zhz",     // underscore chaos
 		"'qsptYFQA73GXgLh9IabcdEFGH12345678'",                              // quote-wrapped hash
 		"season pack {total} files",                                        // template token mid-string
+		"QTVxBgZmUbZnAJFWgJq6",                                             // 20-char bare mixed-case token (under 24)
+		"OF6OfeYgrXyHQjpiLstb",                                             // 20-char bare token w/ digit
 		"",                                                                 // empty
 	}
 	for _, s := range junk {
