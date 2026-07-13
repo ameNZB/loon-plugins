@@ -58,7 +58,7 @@ func (p *Plugin) Metadata() core.Metadata {
 		Name:        "usenet",
 		Version:     "0.1.0",
 		Description: "A basic Usenet indexer: crawls recent posts, builds NZB files, and serves search / groups / download.",
-		Processes:   []string{"web", "worker"},
+		Processes:   []string{"web", "worker", "api"},
 		Migrations:  migrations,
 	}
 }
@@ -78,17 +78,22 @@ func (p *Plugin) Provision(c *core.Core) error {
 		return err
 	}
 
-	// web/all: publish the read + admin capabilities the host pages consume,
-	// and register the plugin-owned admin views (setup wizard + crawl status)
-	// the host wraps in its own chrome.
-	if c.Process == "web" || c.Process == "all" {
+	// web/all/api: publish the READ capabilities — the public site pages AND the
+	// standalone api process both serve search / browse / Newznab / download.
+	if c.Process == "web" || c.Process == "all" || c.Process == "api" {
 		if err := c.Register(pluginapi.UsenetIndexName, p.svc); err != nil {
 			return err
 		}
-		if err := c.Register(pluginapi.UsenetAdminName, p.svc); err != nil {
+		if err := c.Register(pluginapi.UsenetNewznabName, p.svc); err != nil {
 			return err
 		}
-		if err := c.Register(pluginapi.UsenetNewznabName, p.svc); err != nil {
+	}
+
+	// web/all only: the admin capability + the plugin-owned admin views (setup
+	// wizard + crawl status) the host wraps in its own chrome. The api process
+	// has no view system or admin surface, so these stay out of it.
+	if c.Process == "web" || c.Process == "all" {
+		if err := c.Register(pluginapi.UsenetAdminName, p.svc); err != nil {
 			return err
 		}
 		if err := p.registerViews(c); err != nil {
