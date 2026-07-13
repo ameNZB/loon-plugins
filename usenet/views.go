@@ -261,8 +261,12 @@ func (p *Plugin) renderCrawlers(ctx context.Context, msg, errMsg string) (templa
 		groups[i] = vm
 	}
 	jobs, running := p.jobVMs()
+	builder, err := p.st.builderInfo(ctx, 15)
+	if err != nil {
+		return "", err
+	}
 	return p.frag("crawlers.html", map[string]any{
-		"Stats": stats, "Groups": groups, "Jobs": jobs,
+		"Stats": stats, "Groups": groups, "Jobs": jobs, "Builder": builder,
 		"AutoRefresh": running, "Msg": msg, "Err": errMsg,
 	})
 }

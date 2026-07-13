@@ -45,10 +45,10 @@ func (c *Config) applyDefaults() {
 		c.MaxArticlesPerGroup = 20000
 	}
 	if c.BackfillBatchesPerRun <= 0 {
-		c.BackfillBatchesPerRun = 10
+		c.BackfillBatchesPerRun = 25 // pull more history per pass so releases complete
 	}
 	if c.BackfillIntervalMin <= 0 {
-		c.BackfillIntervalMin = 30
+		c.BackfillIntervalMin = 5 // keep backfilling frequently, not once every 30 min
 	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 119

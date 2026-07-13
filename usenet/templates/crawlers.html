@@ -36,6 +36,34 @@
     {{else}}<div class="text-muted small">No usenet jobs registered in this process.</div>{{end}}
 </div>
 
+{{with .Builder}}
+<div class="card">
+    <h2>Builder</h2>
+    <p class="text-muted small mb-2">
+        {{.StagedArticles}} articles staged · {{.Releases}} release(s) forming ·
+        <strong>{{.Ready}}</strong> ready to assemble
+    </p>
+    {{if .Pending}}
+    <p class="text-muted small mb-2">Largest incomplete releases (still crawling their segments — this is why they haven't built yet):</p>
+    <div class="table-responsive">
+        <table class="table table-dark table-sm align-middle">
+            <thead><tr><th>Release</th><th style="min-width:150px">Progress</th><th class="text-end">Have / need</th><th class="text-end">Segments</th></tr></thead>
+            <tbody>
+            {{range .Pending}}
+                <tr>
+                    <td style="word-break:break-all"><code>{{.Base}}</code></td>
+                    <td><div class="cov-bar"><span class="cov-have" style="width:{{.Pct}}%"></span></div></td>
+                    <td class="text-end small">{{.Have}} / {{.Need}} {{if .Multi}}files{{else}}parts{{end}}</td>
+                    <td class="text-end small text-muted">{{.Segments}}</td>
+                </tr>
+            {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{else if .Releases}}<div class="text-muted small">All staged releases are complete.</div>{{end}}
+</div>
+{{end}}
+
 <div class="card">
     <h2>Coverage</h2>
     <div class="cov-legend">
