@@ -96,3 +96,40 @@ func StatContributors(c *core.Core) []StatContributor {
 	}
 	return out
 }
+
+// ── Event bus hook ─────────────────────────────────────────────────
+
+// Emitter is the publish side of a host event bus (loon-baseline/events.Bus
+// satisfies it structurally). A plugin publishes domain events through it; the
+// host — or another plugin — subscribes on its own bus. Neither imports the
+// other; they meet here.
+type Emitter interface {
+	Emit(ctx context.Context, topic string, payload any)
+}
+
+// Well-known event topics plugins publish.
+const (
+	// EventIngested fires after a batch of new releases lands (payload: the
+	// number inserted, an int). Subscribers typically invalidate search caches.
+	EventIngested = "usenet.ingested"
+)
+
+const eventsCapability = "events"
+
+// RegisterEvents publishes the host's event bus so plugins can Emit through it.
+// Call once at wiring time. A host with no bus simply doesn't call this, and
+// EmitEvent becomes a no-op everywhere.
+func RegisterEvents(c *core.Core, e Emitter) error {
+	return c.Register(eventsCapability, e)
+}
+
+// EmitEvent publishes a best-effort event through the host bus if one is
+// registered — no bus, no subscriber, no-op. Publishing never requires a
+// subscriber to exist.
+func EmitEvent(c *core.Core, ctx context.Context, topic string, payload any) {
+	if v, ok := c.Lookup(eventsCapability); ok {
+		if e, ok := v.(Emitter); ok {
+			e.Emit(ctx, topic, payload)
+		}
+	}
+}

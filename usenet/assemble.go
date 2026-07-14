@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/ameNZB/loon-plugins/pluginapi"
 )
 
 // runBuild assembles complete (group, base_subject) sets into NZB files. A set
@@ -78,6 +80,12 @@ func (p *Plugin) runBuild(ctx context.Context) {
 		}
 	}
 	p.buildJob.Log("built %d NZB file(s) from %d candidate group(s)", built, len(keys))
+	if built > 0 {
+		// New releases changed the search surface — publish so a subscriber
+		// (e.g. a cache invalidator in the worker) can react. Best-effort: no
+		// host event bus => no-op.
+		pluginapi.EmitEvent(p.core, ctx, pluginapi.EventIngested, built)
+	}
 	p.buildJob.SetIdle(p.nextCrawl())
 }
 
