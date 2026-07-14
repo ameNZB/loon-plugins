@@ -2,6 +2,9 @@ package pluginapi
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 )
 
@@ -170,10 +173,11 @@ type NewznabRequest struct {
 }
 
 // NewznabResult is a rendered API response (XML feed/caps, or NZB bytes for get).
+// The short JSON tags let a host cache it directly with cache.SetJSON/GetJSON.
 type NewznabResult struct {
-	Body        []byte
-	ContentType string
-	Filename    string // set for get → Content-Disposition
+	Body        []byte `json:"b"`
+	ContentType string `json:"c"`
+	Filename    string `json:"f"` // set for get → Content-Disposition
 }
 
 // UsenetNewznab is the Newznab/Torznab API surface — registered in web/all.
@@ -186,3 +190,25 @@ const (
 	UsenetAdminName   = "usenet.admin"
 	UsenetNewznabName = "usenet.newznab"
 )
+
+// NewznabCachePrefix namespaces every cached Newznab response. A worker clears
+// this prefix (cache.PrefixDeleter) after an ingest to invalidate the search
+// cache; the topic is pluginapi.EventIngested.
+const NewznabCachePrefix = "newznab:v1:"
+
+// NewznabCacheKey hashes the request fields that determine the response, so any
+// tier caching Newznab results (the loon-api read tier, a web host) computes the
+// SAME key and can share one Redis. BaseURL is excluded (constant per host);
+// APIKey is INCLUDED because the plugin embeds it in download links, so two keys
+// must not share an entry. t=get downloads should not be cached by the caller.
+func NewznabCacheKey(r NewznabRequest) string {
+	payload := struct {
+		T, Q  string
+		C     []int
+		L, O  int
+		ID, K string
+	}{r.Function, r.Query, r.Categories, r.Limit, r.Offset, r.ID, r.APIKey}
+	b, _ := json.Marshal(payload)
+	sum := sha256.Sum256(b)
+	return NewznabCachePrefix + hex.EncodeToString(sum[:16])
+}
