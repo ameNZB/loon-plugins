@@ -118,6 +118,52 @@ func TestMultiFileGrouping(t *testing.T) {
 	}
 }
 
+// TestAgentPostedSubjectContract pins the round-trip with loon-agent: the
+// canonical subject the agent posts (services/upload_usenet.go: UploadDirectory
+// -> UploadToUsenet builds `<release> [i/F] - "name" yEnc (n/P)`) must parse
+// back into the same shared release base + the right file/part indices for every
+// part of every file, so the crawler groups the whole release into one NZB. If
+// either side's format drifts, this fails.
+func TestAgentPostedSubjectContract(t *testing.T) {
+	// Exact mirror of the agent's fmt.Sprintf.
+	agentSubject := func(release string, fileIdx, fileCount int, name string, part, parts int) string {
+		return fmt.Sprintf(`%s [%d/%d] - "%s" yEnc (%d/%d)`, release, fileIdx, fileCount, name, part, parts)
+	}
+
+	for _, tc := range []struct {
+		mode, release string
+		names         []string
+	}{
+		{"real names", "My.Release.2024.1080p.BluRay.x264-GRP", []string{"grp-rel.mkv", "grp-rel.nfo", "grp-rel.sfv"}},
+		{"obfuscated", "aB3xK9mQ2pL7wR4t", []string{"k7Rm2p.mkv", "p9XnQ4.nfo"}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			const parts = 12
+			seenBase := map[string]bool{}
+			for f, name := range tc.names {
+				for p := 1; p <= parts; p++ {
+					base, partNum, totalParts, seg, fileNum, totalFiles, fileParts := parseSubject(
+						agentSubject(tc.release, f+1, len(tc.names), name, p, parts))
+					seenBase[base] = true
+					if !fileParts || fileNum != f+1 || totalFiles != len(tc.names) {
+						t.Fatalf("file %d/%d part %d: file=(%d/%d,%v)", f+1, len(tc.names), p, fileNum, totalFiles, fileParts)
+					}
+					if partNum != p || totalParts != parts || seg != parts {
+						t.Fatalf("file %d part %d: part=(%d/%d seg=%d), want (%d/%d/%d)", f+1, p, partNum, totalParts, seg, p, parts, parts)
+					}
+				}
+			}
+			// Every file of the release resolves to ONE shared base -> they group.
+			if len(seenBase) != 1 {
+				t.Fatalf("release must yield one base, got %d: %v", len(seenBase), seenBase)
+			}
+			if !seenBase[tc.release] {
+				t.Fatalf("base != release %q; got %v", tc.release, seenBase)
+			}
+		})
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
