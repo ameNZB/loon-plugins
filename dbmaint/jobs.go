@@ -237,8 +237,12 @@ func (p *Plugin) runVacuum(ctx context.Context) {
 				p.vacuum.Log("%s", msg)
 				p.vacuum.SetError(msg)
 				return
+			} else {
+				// Success log only on the genuine ok path (not on a probe
+				// error), and report the measured free bytes — matches the
+				// pre-extraction service.
+				p.vacuum.Log("Pre-flight ok: nzbs is %s, %s free (need %s)", humanBytes(tableBytes), humanBytes(free), humanBytes(needBytes))
 			}
-			p.vacuum.Log("Pre-flight ok: nzbs is %s (need %s free)", humanBytes(tableBytes), humanBytes(needBytes))
 		}
 	}
 
