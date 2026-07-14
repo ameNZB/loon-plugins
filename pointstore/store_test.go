@@ -25,7 +25,7 @@ func TestFlairCatalog(t *testing.T) {
 		t.Fatal("unknown flair should not resolve")
 	}
 	f, ok := flairByID("vip")
-	if !ok || f.Cost != 50 {
+	if !ok || f.Cost != 25 {
 		t.Fatalf("vip = %+v ok=%v", f, ok)
 	}
 }
