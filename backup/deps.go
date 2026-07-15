@@ -51,6 +51,17 @@ type Deps struct {
 	DB PGConn
 	// Config backs the admin-editable mode + retention.
 	Config ConfigStore
+	// FreeDisk returns free bytes on the volume holding BackupDir, and DBSize
+	// the database's on-disk size. Together they are the pre-flight: this job
+	// writes a full copy of everything it protects onto local disk, and
+	// without headroom it fills the volume and takes the SITE down with it —
+	// disk-full is not a backup failure, it is an outage. Both are host
+	// closures so this module needn't pull gopsutil or a DB driver.
+	//
+	// Fail-soft on error (skip the run, don't guess): a backup not taken is
+	// recoverable, a full disk is not.
+	FreeDisk func(ctx context.Context) (int64, error)
+	DBSize   func(ctx context.Context) (int64, error)
 	// StaticDirs is the list of directories to zip, one archive each, named
 	// after the basename (covers -> covers.zip). The host passes its canonical
 	// persistent-dirs list; this plugin has no way to know what is persistent.

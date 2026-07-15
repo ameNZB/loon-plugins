@@ -1,9 +1,13 @@
 package backup
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ameNZB/loon/schedule"
 	"time"
 )
 
@@ -62,6 +66,84 @@ func TestNewestBackupAge(t *testing.T) {
 		}
 	})
 }
+
+// The pre-flight is the guard between "no backup today" and "the site is down".
+// This job stages a full copy locally, so on a volume without room it fills the
+// disk and the site starts erroring — an outage caused by the backup, which
+// protects nothing and breaks what it was protecting.
+func TestPreflight(t *testing.T) {
+	const gb = int64(1) << 30
+
+	newPlugin := func(t *testing.T, free, dbSize int64, mode string) *Plugin {
+		t.Helper()
+		assets := t.TempDir()
+		// ~1 MB of "covers".
+		if err := os.WriteFile(filepath.Join(assets, "cover.jpg"), make([]byte, 1<<20), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		deps = &Deps{
+			BackupDir:  t.TempDir(),
+			StaticDirs: []string{assets},
+			Config:     stubConfig{mode: mode},
+			FreeDisk:   func(context.Context) (int64, error) { return free, nil },
+			DBSize:     func(context.Context) (int64, error) { return dbSize, nil },
+		}
+		t.Cleanup(func() { deps = nil })
+		return &Plugin{job: schedule.RegisterJob("Backup test "+t.Name(), "")}
+	}
+
+	t.Run("refuses when the backup would not fit", func(t *testing.T) {
+		p := newPlugin(t, 1*gb, 10*gb, "full") // 10GB DB, 1GB free
+		if p.preflightOK(context.Background(), false) {
+			t.Error("pre-flight passed with 1GB free for a 10GB database — this is the disk-full outage")
+		}
+	})
+
+	t.Run("allows when there is ample room", func(t *testing.T) {
+		p := newPlugin(t, 100*gb, 1*gb, "full")
+		if !p.preflightOK(context.Background(), false) {
+			t.Error("pre-flight refused with 100GB free for a 1GB database")
+		}
+	})
+
+	t.Run("a manual trigger does not override it", func(t *testing.T) {
+		p := newPlugin(t, 1*gb, 10*gb, "full")
+		if p.preflightOK(context.Background(), true) {
+			t.Error("force=true bypassed the disk pre-flight — an operator pressing Run is not asking for an outage")
+		}
+	})
+
+	t.Run("db_only ignores asset size but still checks the dump", func(t *testing.T) {
+		p := newPlugin(t, 1*gb, 10*gb, "db_only")
+		if p.preflightOK(context.Background(), false) {
+			t.Error("db_only passed with 1GB free for a 10GB dump")
+		}
+	})
+
+	t.Run("an unreadable free-disk probe skips rather than guesses", func(t *testing.T) {
+		p := newPlugin(t, 100*gb, 1*gb, "full")
+		deps.FreeDisk = func(context.Context) (int64, error) { return 0, errors.New("boom") }
+		if p.preflightOK(context.Background(), false) {
+			t.Error("pre-flight proceeded despite not knowing free space — must fail toward not backing up")
+		}
+	})
+
+	t.Run("an unreadable db-size probe skips rather than guesses", func(t *testing.T) {
+		p := newPlugin(t, 100*gb, 1*gb, "full")
+		deps.DBSize = func(context.Context) (int64, error) { return 0, errors.New("boom") }
+		if p.preflightOK(context.Background(), false) {
+			t.Error("pre-flight proceeded despite not knowing the dump size")
+		}
+	})
+}
+
+type stubConfig struct {
+	mode string
+	keep int
+}
+
+func (s stubConfig) GetBackupMode(context.Context) string   { return s.mode }
+func (s stubConfig) GetBackupKeepCount(context.Context) int { return s.keep }
 
 // prune must only ever touch its own dated folders: BackupDir is a bind mount
 // an operator may keep other things in.

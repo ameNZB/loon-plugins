@@ -50,6 +50,26 @@ func (p *Plugin) doRun(ctx context.Context, force bool) {
 		}
 	}
 
+	// Free-disk pre-flight. This job writes a full copy of everything it
+	// protects onto local disk before anything else can happen — so on a
+	// volume without room it does not merely fail, it fills the disk and the
+	// SITE starts erroring. That is an outage caused by the backup, which is
+	// the worst possible trade: it protects nothing and breaks the thing it
+	// was protecting.
+	//
+	// The estimate is deliberately an upper bound (the zips and the gzipped
+	// dump both come out smaller than their sources), so we err toward
+	// skipping a backup that would have fit. A backup not taken is
+	// recoverable; a full disk on the app server is not.
+	//
+	// Note this gate is expected to REFUSE on a box that has no room for a
+	// full copy — which is the honest answer, and is exactly the condition
+	// BACKUP-DESIGN.md's restic rework removes by streaming off-box instead
+	// of staging locally. Skipping loudly is the interim behaviour, not a bug.
+	if !p.preflightOK(ctx, force) {
+		return
+	}
+
 	stamp := time.Now().Format(stampFormat)
 	dest := filepath.Join(deps.BackupDir, stamp)
 	job.Log("Creating backup directory: %s", dest)
@@ -98,6 +118,92 @@ func (p *Plugin) doRun(ctx context.Context, force bool) {
 	p.prune(job.Log, deps.Config.GetBackupKeepCount(ctx))
 
 	job.Log("Backup complete → %s", dest)
+}
+
+// preflightOK reports whether there is room to write this backup without
+// filling the volume. false = skip (already logged).
+//
+// force (a manual /admin/jobs trigger) overrides the last-run guard but NOT
+// this: an operator asking for a backup is not asking for an outage, and they
+// cannot see the free-space arithmetic from the button.
+func (p *Plugin) preflightOK(ctx context.Context, force bool) bool {
+	job := p.job
+	if deps.FreeDisk == nil || deps.DBSize == nil {
+		job.Log("WARN no disk pre-flight wired — proceeding blind")
+		return true
+	}
+
+	var need int64
+	if deps.Config.GetBackupMode(ctx) != "db_only" {
+		for _, src := range deps.StaticDirs {
+			sz, err := dirSize(src)
+			if err != nil {
+				job.Log("WARN couldn't size %s for the disk pre-flight: %v", src, err)
+				continue
+			}
+			need += sz
+		}
+	}
+	dbBytes, err := deps.DBSize(ctx)
+	if err != nil {
+		job.Log("ERROR couldn't query database size for the disk pre-flight: %v — skipping this run rather than risk filling the disk", err)
+		return false
+	}
+	need += dbBytes
+
+	// 120%: the same shape as dbmaint's vacuum multiplier — headroom so we
+	// don't land on exactly zero free.
+	need = need * 120 / 100
+
+	free, err := deps.FreeDisk(ctx)
+	if err != nil {
+		job.Log("ERROR couldn't read free disk for the pre-flight: %v — skipping this run rather than risk filling the disk", err)
+		return false
+	}
+	if free < need {
+		job.Log("SKIPPED: need ~%s free to stage a full backup (assets + database, +20%% headroom), only %s available on the backup volume. "+
+			"Refusing rather than filling the disk and taking the site down. "+
+			"This box cannot hold a full local copy — see BACKUP-DESIGN.md (restic streams off-box instead of staging here).",
+			humanBytes(need), humanBytes(free))
+		if force {
+			job.Log("(manual trigger does not override the disk pre-flight)")
+		}
+		return false
+	}
+	return true
+}
+
+// dirSize sums the regular files under root. Missing dirs contribute 0 rather
+// than erroring — a not-yet-created asset dir is not a reason to skip.
+func dirSize(root string) (int64, error) {
+	var total int64
+	err := filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	return total, err
+}
+
+func humanBytes(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return fmt.Sprintf("%.1f GB", float64(b)/float64(1<<30))
+	case b >= 1<<20:
+		return fmt.Sprintf("%.0f MB", float64(b)/float64(1<<20))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 // newestBackupAge reports how long ago the most recent dated run folder was
