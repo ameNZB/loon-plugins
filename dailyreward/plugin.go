@@ -6,14 +6,23 @@
 // as a cross-cutting capability.
 //
 // The captcha is looked up structurally off the extension registry (key
-// "captcha"), so this plugin never imports the host's captcha package. If no
-// host registered one, the claim simply runs without a captcha gate.
+// "captcha"), so this plugin never imports the host's captcha package.
+//
+// Two cases that look identical from here and are not: a host that registered
+// NO captcha has chosen not to gate, and the claim runs ungated (safe enough
+// behind auth + once-per-day; logged at boot so it is a choice rather than a
+// surprise). A host that registered one we cannot use has a wiring bug, and
+// booting anyway would serve an ungated points endpoint while looking healthy —
+// so that fails Provision.
 package dailyreward
 
 import (
 	"context"
 	"embed"
+	"errors"
+	"fmt"
 	"html/template"
+	"log"
 
 	"github.com/ameNZB/loon/core"
 )
@@ -60,8 +69,29 @@ func (p *Plugin) Provision(c *core.Core) error {
 	p.core = c
 	p.st = NewPGStore(c.Storage.SchemaDB("dailyreward"))
 
+	// A host that registered a captcha and had it silently dropped would serve
+	// an UNGATED points-granting POST, with no error anywhere to say so. That
+	// is the difference between "this host chose not to gate" (fine, below) and
+	// "this host tried to gate and we lost it" (a wiring bug wearing the same
+	// face). `p.captcha, _ = v.(captchaCap)` could not tell them apart.
+	//
+	// loon/core says so directly: "A failed type assertion is a programmer
+	// error the consumer should surface from Provision (aborting boot), not
+	// swallow." plugins/store does exactly that for RankGranter. So does this.
 	if v, ok := c.Lookup(captchaExtension); ok {
-		p.captcha, _ = v.(captchaCap)
+		cap, ok := v.(captchaCap)
+		if !ok {
+			return errors.New(formatCaptchaMismatch(captchaExtension, v))
+		}
+		p.captcha = cap
+	}
+	// No captcha registered at all is a deliberate host choice — the claim runs
+	// ungated, which is safe enough behind auth + once-per-day. Say so out loud
+	// anyway: an operator who MEANT to wire one should not have to read this
+	// file to discover they didn't.
+	if p.captcha == nil {
+		log.Printf("dailyreward: WARNING no %q extension registered — the daily claim POST will run UNGATED",
+			captchaExtension)
 	}
 
 	t, err := template.ParseFS(tmplFS, "templates/*.html")
@@ -89,6 +119,16 @@ func (p *Plugin) Provision(c *core.Core) error {
 		Public: true,
 		Render: p.renderProfileStreak,
 	})
+}
+
+// formatCaptchaMismatch builds the boot error for a captcha registered under
+// the right key with the wrong shape. Split out so a test can assert the
+// message stays actionable: it must name the key, the offending type, and what
+// swallowing it would have cost.
+func formatCaptchaMismatch(key string, v any) string {
+	return fmt.Sprintf("dailyreward: extension %q is %T, which does not implement the captcha capability "+
+		"(Verify(ctx, token, ip) error + WidgetHTML() template.HTML) — refusing to boot rather than serve "+
+		"an ungated points endpoint", key, v)
 }
 
 func (p *Plugin) Start(ctx context.Context) error { return nil }
