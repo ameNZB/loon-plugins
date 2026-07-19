@@ -3,9 +3,9 @@ package catalog
 import (
 	"context"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // service implements pluginapi.Catalog (taxonomy) over the static tree + the

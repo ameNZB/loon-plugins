@@ -6,7 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // Store is pointstore's persistence: which flair a user has equipped. The plugin

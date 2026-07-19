@@ -6,7 +6,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // Store is dailyreward's persistence contract. The plugin logic depends on this

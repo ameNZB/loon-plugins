@@ -10,7 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // The catalog plugin contributes a "Categories" section to the host's

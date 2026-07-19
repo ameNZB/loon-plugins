@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // Store is usenet's persistence contract. It's segmented into concern-based

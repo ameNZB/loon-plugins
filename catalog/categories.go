@@ -3,7 +3,7 @@ package catalog
 import (
 	"strings"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // taxonomy is the standard Newznab category tree. Top-level ids are the

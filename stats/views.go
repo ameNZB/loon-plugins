@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // Two presentation views over the latest snapshot: a full "Site stats" page

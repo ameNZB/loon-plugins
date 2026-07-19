@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // This file is the callback/hook mechanism for cross-cutting concerns (backups,

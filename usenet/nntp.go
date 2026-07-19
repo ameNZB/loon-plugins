@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ameNZB/loon/nntp"
+	"github.com/the-loon-clan/loon/nntp"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // dialServer opens (and, if credentials are set, authenticates) a single NNTP

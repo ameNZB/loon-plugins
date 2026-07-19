@@ -12,9 +12,9 @@ import (
 	"io"
 	"time"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 func init() {

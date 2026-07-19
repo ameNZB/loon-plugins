@@ -24,7 +24,7 @@ import (
 	"html/template"
 	"log"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 )
 
 //go:embed migrations/*.sql

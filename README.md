@@ -4,7 +4,7 @@
 
 <h1 align="center">loon-plugins</h1>
 
-<p align="center">A collection of plugins for the <a href="https://github.com/ameNZB/loon">loon</a> framework.</p>
+<p align="center">A collection of plugins for the <a href="https://github.com/The-Loon-Clan/loon">loon</a> framework.</p>
 
 ---
 
@@ -38,8 +38,8 @@ of narrow ports the host injects.
 1. In the host's `go.mod` (sibling-checkout `replace` until loon tags releases):
 
    ```
-   require github.com/ameNZB/loon-plugins v0.0.0-...
-   replace github.com/ameNZB/loon-plugins => ../loon-plugins
+   require github.com/the-loon-clan/loon-plugins v0.0.0-...
+   replace github.com/the-loon-clan/loon-plugins => ../loon-plugins
    ```
 
 2. Import the plugin — its `init()` self-registers. Self-contained plugins need
@@ -47,14 +47,14 @@ of narrow ports the host injects.
    `core.Boot`:
 
    ```go
-   import _ "github.com/ameNZB/loon-plugins/usenet"   // self-contained
+   import _ "github.com/the-loon-clan/loon-plugins/usenet"   // self-contained
    ```
 
 3. Docker: a `replace` pointing outside the build context needs a BuildKit
    build-context (`--build-context loonplugins=../loon-plugins` +
    `COPY --from=loonplugins`) — the same three-way contract loon uses.
 
-See [loon-demo-site](https://github.com/ameNZB/loon-demo-site) for a working host
+See [loon-demo-site](https://github.com/The-Loon-Clan/loon-demo-site) for a working host
 that wires `usenet`, `scraper`, `backups`, and `stats`.
 
 ## Development

@@ -10,7 +10,7 @@ package dbmaint
 import (
 	"context"
 
-	"github.com/ameNZB/loon/schedule"
+	"github.com/the-loon-clan/loon/schedule"
 )
 
 // IndexUsage is one candidate index for the reindex pass — the plugin's own

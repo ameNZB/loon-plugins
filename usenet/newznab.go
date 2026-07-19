@@ -9,7 +9,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // Newznab/Torznab API. The plugin owns the whole XML contract (caps + search

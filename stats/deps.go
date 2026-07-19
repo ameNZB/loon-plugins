@@ -3,7 +3,7 @@ package stats
 import (
 	"context"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // Deps is the one host seam: where the collected snapshot is cached. The stats

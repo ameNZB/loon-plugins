@@ -5,7 +5,7 @@ import (
 	"encoding/xml"
 	"errors"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 var errNoServer = errors.New("usenet: no server configured")

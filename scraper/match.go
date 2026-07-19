@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 // runMatch enriches host-provided release candidates: for each, pick the source

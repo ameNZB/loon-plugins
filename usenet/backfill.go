@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ameNZB/loon/nntp"
+	"github.com/the-loon-clan/loon/nntp"
 )
 
 // runBackfill walks each active group's back_watermark downward toward server_low,

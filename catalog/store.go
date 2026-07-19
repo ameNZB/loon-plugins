@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon/catalog"
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/catalog"
+	"github.com/the-loon-clan/loon/core"
 )
 
 // Store is catalog's persistence contract (entry upserts, release covers, and

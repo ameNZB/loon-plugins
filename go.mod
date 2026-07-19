@@ -1,9 +1,9 @@
-module github.com/ameNZB/loon-plugins
+module github.com/the-loon-clan/loon-plugins
 
 go 1.26.4
 
 require (
-	github.com/ameNZB/loon v0.0.0-00010101000000-000000000000
+	github.com/the-loon-clan/loon v0.0.0-00010101000000-000000000000
 	github.com/jmoiron/sqlx v1.3.5
 )
 
@@ -40,4 +40,4 @@ require (
 // Until loon publishes tagged releases, resolve it as a sibling checkout —
 // same discipline as indexer-site and loon-demo-site. When loon tags a
 // release this replace drops and loon becomes an ordinary versioned require.
-replace github.com/ameNZB/loon => ../loon
+replace github.com/the-loon-clan/loon => ../loon

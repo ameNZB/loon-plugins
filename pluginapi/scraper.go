@@ -3,7 +3,7 @@ package pluginapi
 import (
 	"context"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 // CatalogSink persists a scraped catalog.CatalogEntry into the host's unified

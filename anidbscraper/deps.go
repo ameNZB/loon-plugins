@@ -1,6 +1,6 @@
 package anidbscraper
 
-import "github.com/ameNZB/loon-plugins/pluginapi"
+import "github.com/the-loon-clan/loon-plugins/pluginapi"
 
 // Deps are the host-owned collaborators the scraper needs injected before boot.
 // The host builds thin adapters over its existing repositories and calls

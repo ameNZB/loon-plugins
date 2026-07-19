@@ -15,7 +15,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // runBuild assembles complete (group, base_subject) sets into NZB files. A set

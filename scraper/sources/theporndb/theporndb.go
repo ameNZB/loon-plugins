@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 // ErrNoLocalID is returned by Fetch — this source is query-only.

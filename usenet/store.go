@@ -9,9 +9,9 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon/core"
+	"github.com/the-loon-clan/loon/core"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // store is the usenet-schema data layer. Every method runs through the

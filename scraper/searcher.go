@@ -3,7 +3,7 @@ package scraper
 import (
 	"context"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 // Searcher is the optional capability for API-search catalog sources that have

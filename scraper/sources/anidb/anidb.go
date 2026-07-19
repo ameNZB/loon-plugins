@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 var errNoClient = errors.New("anidb: no client name configured (register one at anidb.net)")

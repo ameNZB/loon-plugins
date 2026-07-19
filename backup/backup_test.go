@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ameNZB/loon/schedule"
+	"github.com/the-loon-clan/loon/schedule"
 	"time"
 )
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ameNZB/loon/nntp"
+	"github.com/the-loon-clan/loon/nntp"
 )
 
 // stagedArticle is one parsed overview line awaiting assembly.

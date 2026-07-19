@@ -3,7 +3,7 @@ package scraper
 import (
 	"context"
 
-	"github.com/ameNZB/loon-plugins/pluginapi"
+	"github.com/the-loon-clan/loon-plugins/pluginapi"
 )
 
 // Deps are the host-owned collaborators the scraper needs injected before boot.

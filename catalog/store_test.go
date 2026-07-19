@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ameNZB/loon/catalog"
+	"github.com/the-loon-clan/loon/catalog"
 )
 
 // mockStore is an in-memory Store for testing without a database.
